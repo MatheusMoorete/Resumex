@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef } from 'react';
+import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { SignIn, useAuth, UserButton } from '@clerk/clerk-react';
 import Header from './components/Header';
 import ApiKeyModal from './components/ApiKeyModal';
@@ -27,6 +27,16 @@ import {
   buildSpecAuditUserMessage,
   buildSpecFromEvidenceUserMessage,
 } from './prompts/evidence';
+import { createMockFileData, mockSummary } from './mocks/e2eMock';
+
+function isLocalBrowserHost() {
+  if (typeof window === 'undefined') return false;
+  return ['localhost', '127.0.0.1', '::1'].includes(window.location.hostname);
+}
+
+const isE2EMockMode = import.meta.env.DEV
+  && import.meta.env.VITE_E2E_MOCK === 'true'
+  && isLocalBrowserHost();
 
 /**
  * App States:
@@ -92,6 +102,81 @@ function getSpecAuditStatus(auditText) {
   return match[1].trim().toUpperCase();
 }
 
+const HIGH_RISK_PATTERN = /(dose|dosagem|mg|mcg|ml|mmhg|cm3|cm|mm|grau|graus|°|>=|<=|>|<|=|\d|paco2|pao2|sat|pas|pam|pic|ppc|glasgow|gcs|tce|grave|moderado|leve|apneia|eeg|arteriografia|doppler|cintilografia|protocolo|conduta|cirurgia|drenagem|manitol|salina|fenitoina|barbit|cortico|anticoagul|iot|sedacao|seda|bnm|xabcde)/i;
+const UNCERTAIN_PATTERN = /(incerto|duvid|ilegivel|ilegível|falha|conflito|possivel|possível|nao identificado|não identificado|significado)/i;
+const SECTION_PATTERN = /^###\s+(.+)/;
+const PAGE_PATTERN = /^##\s+P[aá]gina\s+(\d+)/i;
+
+function extractHighRiskEvidenceItems(evidenceMap) {
+  if (!evidenceMap) return [];
+
+  const items = [];
+  let page = null;
+  let section = '';
+
+  evidenceMap.split('\n').forEach((rawLine) => {
+    const line = rawLine.trim();
+    if (!line) return;
+
+    const pageMatch = line.match(PAGE_PATTERN);
+    if (pageMatch) {
+      page = Number(pageMatch[1]);
+      section = '';
+      return;
+    }
+
+    const sectionMatch = line.match(SECTION_PATTERN);
+    if (sectionMatch) {
+      section = sectionMatch[1].trim();
+      return;
+    }
+
+    const inUncertainSection = /manuscritos incertos|falhas e riscos|valores/i.test(section);
+    const inCriticalManuscriptSection = /manuscritos legiveis|manuscritos legíveis/i.test(section) && HIGH_RISK_PATTERN.test(line);
+    const inRiskSection = inUncertainSection || inCriticalManuscriptSection;
+    const isPotentiallyUncertain = UNCERTAIN_PATTERN.test(line) || /manuscritos legiveis|manuscritos legíveis/i.test(section);
+    const isHighRisk = HIGH_RISK_PATTERN.test(line);
+
+    if (page && inRiskSection && isPotentiallyUncertain && isHighRisk) {
+      items.push({
+        id: `p${page}-${items.length}`,
+        page,
+        section,
+        text: line.replace(/^[-*]\s*/, ''),
+        reason: 'Pode alterar valor, conduta, classificacao, protocolo ou interpretacao clinica.',
+      });
+    }
+  });
+
+  return items;
+}
+
+function buildRiskReviewNotes(highRiskItems, riskDecisions) {
+  if (!highRiskItems.length) return '';
+
+  const lines = highRiskItems.map((item) => {
+    const decision = riskDecisions[item.id];
+    if (!decision) {
+      return `- Pagina ${item.page}: "${item.text}" -> sem decisao; nao usar no resumo principal.`;
+    }
+    if (decision.action === 'ignore') {
+      return `- Pagina ${item.page}: "${item.text}" -> ignorar no resumo principal; manter como revisao humana se necessario.`;
+    }
+    if (decision.action === 'use') {
+      return `- Pagina ${item.page}: usar literalmente: "${item.text}". Nao expandir nem interpretar.`;
+    }
+    return `- Pagina ${item.page}: substituir trecho incerto por: "${decision.value}". Usar apenas esta correcao confirmada.`;
+  });
+
+  return `## DECISOES HUMANAS SOBRE MANUSCRITOS/VALORES INCERTOS\n\n${lines.join('\n')}`;
+}
+
+function isRiskDecisionResolved(decision) {
+  if (!decision) return false;
+  if (decision.action === 'correct') return Boolean(decision.value?.trim());
+  return true;
+}
+
 export default function App() {
   const { isLoaded, isSignedIn, getToken } = useAuth();
   // Core state - DeepSeek generates text; GLM transcribes visual/handwritten pages.
@@ -121,6 +206,7 @@ export default function App() {
   const [spec, setSpec] = useState('');
   const [specAudit, setSpecAudit] = useState('');
   const [specCorrectionCount, setSpecCorrectionCount] = useState(0);
+  const [riskDecisions, setRiskDecisions] = useState({});
   const [summary, setSummary] = useState('');
   const [isAuditing, setIsAuditing] = useState(false);
   const [missingPages, setMissingPages] = useState([]);
@@ -131,9 +217,27 @@ export default function App() {
   const abortControllerRef = useRef(null);
   const hasDeepseekAccess = Boolean(deepseekKey || serverConfig.deepseekConfigured);
   const hasZhipuAccess = Boolean(zhipuKey || serverConfig.zhipuConfigured);
+  const highRiskItems = useMemo(
+    () => extractHighRiskEvidenceItems(evidenceMap || fileData?.evidenceMap || ''),
+    [evidenceMap, fileData]
+  );
+  const unresolvedRiskCount = highRiskItems.filter((item) => !isRiskDecisionResolved(riskDecisions[item.id])).length;
 
   useEffect(() => {
     let isMounted = true;
+
+    if (isE2EMockMode) {
+      setAuthTokenGetter(null);
+      setServerConfig({
+        deepseekConfigured: true,
+        zhipuConfigured: true,
+        loaded: true,
+      });
+      setAccessDenied(false);
+      return () => {
+        isMounted = false;
+      };
+    }
 
     if (!isLoaded) return () => {
       isMounted = false;
@@ -182,6 +286,26 @@ export default function App() {
       isMounted = false;
     };
   }, [getToken, isLoaded, isSignedIn]);
+
+  useEffect(() => {
+    if (!isE2EMockMode) return;
+
+    setFileData(createMockFileData());
+    setPreferences({
+      provider: 'mock-e2e',
+      readHandwriting: false,
+      handwritingMode: 'manual',
+      manualVisionPages: [],
+      method: { id: 'free', name: 'Livre' },
+      formats: [{ id: 'bullets', label: 'Bullet points' }],
+      source: { id: 'mock', label: 'Mock E2E' },
+      detailLevel: { id: 'balanced', label: 'Equilibrado' },
+    });
+    setSpec('# SPEC Mock E2E\n\nValidar exportacao para o Notion sem consumir tokens.');
+    setSummary(mockSummary);
+    setMissingPages([]);
+    setAppState('result');
+  }, []);
 
   const refreshServerConfig = useCallback(async () => {
     const token = await getToken();
@@ -352,6 +476,7 @@ export default function App() {
     setSpec('');
     setSpecAudit('');
     setSpecCorrectionCount(0);
+    setRiskDecisions({});
     setEvidenceMap('');
     setError('');
 
@@ -452,6 +577,7 @@ export default function App() {
     }
 
     if (!fileData || !spec.trim()) return;
+    if (unresolvedRiskCount > 0) return;
 
     setAppState('processing');
     setSummary('');
@@ -463,12 +589,16 @@ export default function App() {
     const summaryPrompt = buildSummaryPrompt();
     const rawContext = contextBase || fileData.contextBase || fileData.text;
     const evidenceContext = evidenceMap || fileData.evidenceMap || '';
+    const riskReviewNotes = buildRiskReviewNotes(highRiskItems, riskDecisions);
     const textContext = evidenceContext
       ? `## MAPA DE EVIDENCIAS VALIDADO\n\n${evidenceContext}\n\n---\n\n## CONTEXTO BRUTO DO PDF\n\n${rawContext}`
       : rawContext;
     
     // Inject reinforcement instructions at the beginning of user message if present
     let userMessage = buildSummaryUserMessage(textContext, spec);
+    if (riskReviewNotes) {
+      userMessage = `${riskReviewNotes}\n\n---\n\n${userMessage}`;
+    }
     if (reinforcementString) {
       userMessage = `${reinforcementString}\n\n---\n\n${userMessage}`;
     }
@@ -522,7 +652,7 @@ export default function App() {
       setError(err.message || 'Erro ao gerar o resumo.');
       setAppState('error');
     }
-  }, [deepseekKey, hasDeepseekAccess, fileData, spec, preferences, contextBase, evidenceMap]);
+  }, [deepseekKey, hasDeepseekAccess, fileData, spec, preferences, contextBase, evidenceMap, highRiskItems, riskDecisions, unresolvedRiskCount]);
 
   // --- Initial Summary Generation ---
   const handleGenerateFromSpec = useCallback(() => {
@@ -546,6 +676,13 @@ Você DEVE obrigatoriamente incluir e detalhar todas as informações, critério
   const handleRegenerateSpec = useCallback(() => {
     generateSpec(fileData, preferences);
   }, [fileData, preferences, generateSpec]);
+
+  const handleRiskDecisionChange = useCallback((itemId, decision) => {
+    setRiskDecisions((prev) => ({
+      ...prev,
+      [itemId]: decision,
+    }));
+  }, []);
 
   // --- API key saved → continue pending flow ---
   const handleSaveApiKeyAndContinue = useCallback((keys) => {
@@ -571,6 +708,7 @@ Você DEVE obrigatoriamente incluir e detalhar todas as informações, critério
     setSpec('');
     setSpecAudit('');
     setSpecCorrectionCount(0);
+    setRiskDecisions({});
     setSummary('');
     setIsAuditing(false);
     setMissingPages([]);
@@ -590,6 +728,7 @@ Você DEVE obrigatoriamente incluir e detalhar todas as informações, critério
     setSpec('');
     setSpecAudit('');
     setSpecCorrectionCount(0);
+    setRiskDecisions({});
     setMissingPages([]);
     setCoverageReinforcementInstruction('');
     setAppState('upload');
@@ -601,12 +740,13 @@ Você DEVE obrigatoriamente incluir e detalhar todas as informações, critério
     setSpec('');
     setSpecAudit('');
     setSpecCorrectionCount(0);
+    setRiskDecisions({});
     setMissingPages([]);
     setCoverageReinforcementInstruction('');
     setAppState('preferences');
   }, []);
 
-  if (!isLoaded || (isSignedIn && !serverConfig.loaded)) {
+  if (!isE2EMockMode && (!isLoaded || (isSignedIn && !serverConfig.loaded))) {
     return (
       <div className="app-loading-screen">
         <div className="app-loading-shell">
@@ -626,7 +766,7 @@ Você DEVE obrigatoriamente incluir e detalhar todas as informações, critério
     );
   }
 
-  if (!isSignedIn) {
+  if (!isE2EMockMode && !isSignedIn) {
     return (
       <div className="auth-screen">
         <div className="auth-panel clerk-auth-panel">
@@ -766,8 +906,11 @@ Você DEVE obrigatoriamente incluir e detalhar todas as informações, critério
             spec={spec}
             specAudit={specAudit}
             specCorrectionCount={specCorrectionCount}
+            highRiskItems={highRiskItems}
+            riskDecisions={riskDecisions}
             isGenerating={appState === 'generating-spec'}
             onSpecChange={setSpec}
+            onRiskDecisionChange={handleRiskDecisionChange}
             onGenerate={handleGenerateFromSpec}
             onRegenerateSpec={handleRegenerateSpec}
             onBack={handleBackToPreferences}

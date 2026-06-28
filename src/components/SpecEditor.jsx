@@ -17,13 +17,22 @@ function getAuditIssues(specAudit) {
     .slice(0, 6);
 }
 
+function isRiskDecisionResolved(decision) {
+  if (!decision) return false;
+  if (decision.action === 'correct') return Boolean(decision.value?.trim());
+  return true;
+}
+
 export default function SpecEditor({
   fileData,
   spec,
   specAudit,
   specCorrectionCount = 0,
+  highRiskItems = [],
+  riskDecisions = {},
   isGenerating,
   onSpecChange,
+  onRiskDecisionChange,
   onGenerate,
   onRegenerateSpec,
   onBack,
@@ -32,6 +41,7 @@ export default function SpecEditor({
   const textareaRef = useRef(null);
   const auditStatus = getAuditStatus(specAudit);
   const auditIssues = getAuditIssues(specAudit);
+  const unresolvedRiskCount = highRiskItems.filter((item) => !isRiskDecisionResolved(riskDecisions[item.id])).length;
 
   useEffect(() => {
     if (isGenerating) setViewMode('preview');
@@ -82,6 +92,12 @@ export default function SpecEditor({
               Auditoria
             </button>
             <button
+              className={`result-tab ${viewMode === 'risk' ? 'active' : ''}`}
+              onClick={() => setViewMode('risk')}
+            >
+              Revisao critica
+            </button>
+            <button
               className={`result-tab ${viewMode === 'edit' ? 'active' : ''}`}
               onClick={() => setViewMode('edit')}
             >
@@ -104,6 +120,10 @@ export default function SpecEditor({
           <div>
             <span className="spec-quality-label">Ajustes pendentes</span>
             <strong>{auditIssues.length}</strong>
+          </div>
+          <div>
+            <span className="spec-quality-label">Riscos sem decisao</span>
+            <strong>{unresolvedRiskCount}</strong>
           </div>
         </div>
       )}
@@ -173,6 +193,70 @@ export default function SpecEditor({
             />
           </div>
         )}
+
+        {viewMode === 'risk' && !isGenerating && (
+          <div className="spec-risk-panel">
+            <div className="spec-risk-header">
+              <h3>Revisao obrigatoria de alto risco</h3>
+              <p>
+                Confirme trechos incertos que podem alterar valores, condutas, classificacoes ou protocolos.
+              </p>
+            </div>
+
+            {highRiskItems.length === 0 ? (
+              <div className="spec-risk-empty">
+                Nenhum manuscrito ou valor incerto de alto risco foi detectado.
+              </div>
+            ) : (
+              <div className="spec-risk-list">
+                {highRiskItems.map((item) => {
+                  const decision = riskDecisions[item.id];
+                  const resolved = isRiskDecisionResolved(decision);
+                  return (
+                    <div className={`spec-risk-card ${resolved ? 'resolved' : ''}`} key={item.id}>
+                      <div className="spec-risk-card-header">
+                        <span>Pagina {item.page}</span>
+                        <strong>{resolved ? 'Resolvido' : 'Pendente'}</strong>
+                      </div>
+                      <div className="spec-risk-text">{item.text}</div>
+                      <div className="spec-risk-reason">{item.reason}</div>
+
+                      <div className="spec-risk-actions">
+                        <button
+                          type="button"
+                          className={`btn btn-secondary ${decision?.action === 'ignore' ? 'selected' : ''}`}
+                          onClick={() => onRiskDecisionChange(item.id, { action: 'ignore', value: '' })}
+                        >
+                          Ignorar
+                        </button>
+                        <button
+                          type="button"
+                          className={`btn btn-secondary ${decision?.action === 'use' ? 'selected' : ''}`}
+                          onClick={() => onRiskDecisionChange(item.id, { action: 'use', value: item.text })}
+                        >
+                          Usar literal
+                        </button>
+                      </div>
+
+                      <label className="spec-risk-correction">
+                        Corrigir manualmente
+                        <input
+                          className="input"
+                          value={decision?.action === 'correct' ? decision.value : ''}
+                          placeholder="Digite o trecho confirmado"
+                          onChange={(event) => onRiskDecisionChange(item.id, {
+                            action: 'correct',
+                            value: event.target.value,
+                          })}
+                        />
+                      </label>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {!isGenerating && (
@@ -186,10 +270,11 @@ export default function SpecEditor({
           <button
             className="btn btn-primary btn-lg"
             onClick={onGenerate}
-            disabled={!spec.trim()}
+            disabled={!spec.trim() || unresolvedRiskCount > 0}
             id="generate-from-spec-button"
+            title={unresolvedRiskCount > 0 ? 'Resolva os riscos criticos antes de gerar o resumo.' : undefined}
           >
-            Gerar resumo final
+            {unresolvedRiskCount > 0 ? `Resolver ${unresolvedRiskCount} riscos` : 'Gerar resumo final'}
           </button>
         </div>
       )}
