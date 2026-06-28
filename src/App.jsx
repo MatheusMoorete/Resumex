@@ -18,6 +18,13 @@ import {
   buildAuditPrompt, 
   buildAuditUserMessage 
 } from './prompts/templates';
+import {
+  buildEvidenceMapPrompt,
+  buildEvidenceMapUserMessage,
+  buildSpecAuditPrompt,
+  buildSpecAuditUserMessage,
+  buildSpecFromEvidenceUserMessage,
+} from './prompts/evidence';
 
 /**
  * App States:
@@ -101,6 +108,7 @@ export default function App() {
   const [renderingProgress, setRenderingProgress] = useState(0);
   const [transcriptionProgress, setTranscriptionProgress] = useState({ current: 0, total: 0 });
   const [contextBase, setContextBase] = useState('');
+  const [evidenceMap, setEvidenceMap] = useState('');
   const [spec, setSpec] = useState('');
   const [summary, setSummary] = useState('');
   const [isAuditing, setIsAuditing] = useState(false);
@@ -328,25 +336,57 @@ export default function App() {
     fileInfo.contextBase = generatedContext;
     setFileData(fileInfo);
 
-    // 5. Call generator for SPEC
+    // 5. Build an evidence map, then generate and audit the SPEC.
     setAppState('generating-spec');
     setSpec('');
+    setEvidenceMap('');
     setError('');
 
     abortControllerRef.current = new AbortController();
+    const evidencePrompt = buildEvidenceMapPrompt();
     const specPrompt = buildSpecPrompt(prefsToUse);
+    const specAuditPrompt = buildSpecAuditPrompt();
 
     try {
+      let generatedEvidenceMap = '';
       await generateSummary({
         apiKey: deepseekKey,
-        pdfText: generatedContext,
-        systemPrompt: specPrompt,
+        pdfText: buildEvidenceMapUserMessage(generatedContext),
+        systemPrompt: evidencePrompt,
         onChunk: (chunk) => {
-          setSpec((prev) => prev + chunk);
+          generatedEvidenceMap += chunk;
         },
         signal: abortControllerRef.current.signal,
       });
 
+      setEvidenceMap(generatedEvidenceMap);
+      fileInfo.evidenceMap = generatedEvidenceMap;
+      setFileData(fileInfo);
+
+      let generatedSpec = '';
+      await generateSummary({
+        apiKey: deepseekKey,
+        pdfText: buildSpecFromEvidenceUserMessage(generatedEvidenceMap),
+        systemPrompt: specPrompt,
+        onChunk: (chunk) => {
+          generatedSpec += chunk;
+          setSpec(generatedSpec);
+        },
+        signal: abortControllerRef.current.signal,
+      });
+
+      let specAudit = '';
+      await generateSummary({
+        apiKey: deepseekKey,
+        pdfText: buildSpecAuditUserMessage(generatedEvidenceMap, generatedSpec),
+        systemPrompt: specAuditPrompt,
+        onChunk: (chunk) => {
+          specAudit += chunk;
+        },
+        signal: abortControllerRef.current.signal,
+      });
+
+      setSpec(`${generatedSpec}\n\n---\n\n${specAudit}`);
       setAppState('edit-spec');
     } catch (err) {
       if (err.name === 'AbortError') return;
@@ -375,7 +415,11 @@ export default function App() {
     abortControllerRef.current = new AbortController();
 
     const summaryPrompt = buildSummaryPrompt();
-    const textContext = contextBase || fileData.contextBase || fileData.text;
+    const rawContext = contextBase || fileData.contextBase || fileData.text;
+    const evidenceContext = evidenceMap || fileData.evidenceMap || '';
+    const textContext = evidenceContext
+      ? `## MAPA DE EVIDENCIAS VALIDADO\n\n${evidenceContext}\n\n---\n\n## CONTEXTO BRUTO DO PDF\n\n${rawContext}`
+      : rawContext;
     
     // Inject reinforcement instructions at the beginning of user message if present
     let userMessage = buildSummaryUserMessage(textContext, spec);
@@ -432,7 +476,7 @@ export default function App() {
       setError(err.message || 'Erro ao gerar o resumo.');
       setAppState('error');
     }
-  }, [deepseekKey, hasDeepseekAccess, fileData, spec, preferences, contextBase]);
+  }, [deepseekKey, hasDeepseekAccess, fileData, spec, preferences, contextBase, evidenceMap]);
 
   // --- Initial Summary Generation ---
   const handleGenerateFromSpec = useCallback(() => {
@@ -477,6 +521,7 @@ Você DEVE obrigatoriamente incluir e detalhar todas as informações, critério
     setFileData(null);
     setPreferences(null);
     setContextBase('');
+    setEvidenceMap('');
     setSpec('');
     setSummary('');
     setIsAuditing(false);
@@ -493,6 +538,7 @@ Você DEVE obrigatoriamente incluir e detalhar todas as informações, critério
     setFileData(null);
     setPreferences(null);
     setContextBase('');
+    setEvidenceMap('');
     setSpec('');
     setMissingPages([]);
     setCoverageReinforcementInstruction('');
