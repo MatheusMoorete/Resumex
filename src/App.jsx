@@ -21,6 +21,8 @@ import {
 import {
   buildEvidenceMapPrompt,
   buildEvidenceMapUserMessage,
+  buildSpecCorrectionPrompt,
+  buildSpecCorrectionUserMessage,
   buildSpecAuditPrompt,
   buildSpecAuditUserMessage,
   buildSpecFromEvidenceUserMessage,
@@ -83,6 +85,13 @@ function uniqueSortedPages(pages) {
   return [...new Set(pages)].sort((a, b) => a - b);
 }
 
+function getSpecAuditStatus(auditText) {
+  if (!auditText) return 'PENDENTE';
+  const match = auditText.match(/\*\*Status:\*\*\s*([^\n]+)/i);
+  if (!match) return 'PENDENTE';
+  return match[1].trim().toUpperCase();
+}
+
 export default function App() {
   const { isLoaded, isSignedIn, getToken } = useAuth();
   // Core state - DeepSeek generates text; GLM transcribes visual/handwritten pages.
@@ -110,6 +119,8 @@ export default function App() {
   const [contextBase, setContextBase] = useState('');
   const [evidenceMap, setEvidenceMap] = useState('');
   const [spec, setSpec] = useState('');
+  const [specAudit, setSpecAudit] = useState('');
+  const [specCorrectionCount, setSpecCorrectionCount] = useState(0);
   const [summary, setSummary] = useState('');
   const [isAuditing, setIsAuditing] = useState(false);
   const [missingPages, setMissingPages] = useState([]);
@@ -339,6 +350,8 @@ export default function App() {
     // 5. Build an evidence map, then generate and audit the SPEC.
     setAppState('generating-spec');
     setSpec('');
+    setSpecAudit('');
+    setSpecCorrectionCount(0);
     setEvidenceMap('');
     setError('');
 
@@ -346,6 +359,7 @@ export default function App() {
     const evidencePrompt = buildEvidenceMapPrompt();
     const specPrompt = buildSpecPrompt(prefsToUse);
     const specAuditPrompt = buildSpecAuditPrompt();
+    const specCorrectionPrompt = buildSpecCorrectionPrompt();
 
     try {
       let generatedEvidenceMap = '';
@@ -375,18 +389,50 @@ export default function App() {
         signal: abortControllerRef.current.signal,
       });
 
-      let specAudit = '';
-      await generateSummary({
-        apiKey: deepseekKey,
-        pdfText: buildSpecAuditUserMessage(generatedEvidenceMap, generatedSpec),
-        systemPrompt: specAuditPrompt,
-        onChunk: (chunk) => {
-          specAudit += chunk;
-        },
-        signal: abortControllerRef.current.signal,
-      });
+      let currentSpec = generatedSpec;
+      let currentAudit = '';
+      let correctionCount = 0;
 
-      setSpec(`${generatedSpec}\n\n---\n\n${specAudit}`);
+      const auditSpec = async (specToAudit) => {
+        let audit = '';
+        await generateSummary({
+          apiKey: deepseekKey,
+          pdfText: buildSpecAuditUserMessage(generatedEvidenceMap, specToAudit),
+          systemPrompt: specAuditPrompt,
+          onChunk: (chunk) => {
+            audit += chunk;
+          },
+          signal: abortControllerRef.current.signal,
+        });
+        return audit;
+      };
+
+      currentAudit = await auditSpec(currentSpec);
+
+      while (correctionCount < 2 && getSpecAuditStatus(currentAudit) !== 'APROVADA') {
+        correctionCount++;
+        let correctedSpec = '';
+        await generateSummary({
+          apiKey: deepseekKey,
+          pdfText: buildSpecCorrectionUserMessage(generatedEvidenceMap, currentSpec, currentAudit),
+          systemPrompt: specCorrectionPrompt,
+          onChunk: (chunk) => {
+            correctedSpec += chunk;
+          },
+          signal: abortControllerRef.current.signal,
+        });
+
+        currentSpec = correctedSpec;
+        setSpec(currentSpec);
+        currentAudit = await auditSpec(currentSpec);
+      }
+
+      setSpec(currentSpec);
+      setSpecAudit(currentAudit);
+      setSpecCorrectionCount(correctionCount);
+      fileInfo.specAudit = currentAudit;
+      fileInfo.specCorrectionCount = correctionCount;
+      setFileData(fileInfo);
       setAppState('edit-spec');
     } catch (err) {
       if (err.name === 'AbortError') return;
@@ -523,6 +569,8 @@ Você DEVE obrigatoriamente incluir e detalhar todas as informações, critério
     setContextBase('');
     setEvidenceMap('');
     setSpec('');
+    setSpecAudit('');
+    setSpecCorrectionCount(0);
     setSummary('');
     setIsAuditing(false);
     setMissingPages([]);
@@ -540,6 +588,8 @@ Você DEVE obrigatoriamente incluir e detalhar todas as informações, critério
     setContextBase('');
     setEvidenceMap('');
     setSpec('');
+    setSpecAudit('');
+    setSpecCorrectionCount(0);
     setMissingPages([]);
     setCoverageReinforcementInstruction('');
     setAppState('upload');
@@ -549,6 +599,8 @@ Você DEVE obrigatoriamente incluir e detalhar todas as informações, critério
   const handleBackToPreferences = useCallback(() => {
     if (abortControllerRef.current) abortControllerRef.current.abort();
     setSpec('');
+    setSpecAudit('');
+    setSpecCorrectionCount(0);
     setMissingPages([]);
     setCoverageReinforcementInstruction('');
     setAppState('preferences');
@@ -556,14 +608,18 @@ Você DEVE obrigatoriamente incluir e detalhar todas as informações, critério
 
   if (!isLoaded || (isSignedIn && !serverConfig.loaded)) {
     return (
-      <div className="auth-screen">
-        <div className="auth-panel">
-          <div className="auth-brand">
+      <div className="app-loading-screen">
+        <div className="app-loading-shell">
+          <div className="app-loading-mark">
             <div className="header-logo-icon">Rx</div>
-            <div>
-              <h1>ResumeX</h1>
-              <p>Carregando...</p>
-            </div>
+            <span>ResumeX</span>
+          </div>
+          <div className="app-loading-copy">
+            <h1>Preparando ambiente</h1>
+            <p>Validando sessão e conectando APIs.</p>
+          </div>
+          <div className="app-loading-bar" aria-hidden="true">
+            <span />
           </div>
         </div>
       </div>
@@ -708,6 +764,8 @@ Você DEVE obrigatoriamente incluir e detalhar todas as informações, critério
           <SpecEditor
             fileData={fileData}
             spec={spec}
+            specAudit={specAudit}
+            specCorrectionCount={specCorrectionCount}
             isGenerating={appState === 'generating-spec'}
             onSpecChange={setSpec}
             onGenerate={handleGenerateFromSpec}

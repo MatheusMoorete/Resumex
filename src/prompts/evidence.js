@@ -91,6 +91,44 @@ ${spec}
 Audite a SPEC contra o mapa de evidencias.`;
 }
 
+export function buildSpecCorrectionPrompt() {
+  return `Voce e um editor de SPEC medica. Corrija a SPEC usando a auditoria e o mapa de evidencias.
+
+Regras:
+- Corrija todos os problemas apontados na auditoria.
+- Nao adicione informacao que nao esteja no mapa.
+- Preserve a estrutura da SPEC.
+- Nao inclua a auditoria na resposta.
+- Nao escreva explicacoes sobre as correcoes.
+- Se a auditoria pedir preservar valor literal, copie exatamente do mapa.
+- Se uma falha for visual parcial, nao marque a pagina como totalmente perdida.
+- Manuscritos incertos nunca podem virar fatos medicos confirmados.
+
+Responda apenas com a SPEC corrigida em Markdown.`;
+}
+
+export function buildSpecCorrectionUserMessage(evidenceMap, spec, audit) {
+  return `## MAPA DE EVIDENCIAS
+
+${evidenceMap}
+
+---
+
+## SPEC ATUAL
+
+${spec}
+
+---
+
+## AUDITORIA DA SPEC
+
+${audit}
+
+---
+
+Gere agora uma SPEC corrigida.`;
+}
+
 export function buildSpecFromEvidenceUserMessage(evidenceMap) {
   return `## MAPA DE EVIDENCIAS VALIDADO
 

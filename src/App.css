@@ -289,6 +289,68 @@ body {
   background: var(--bg-primary);
 }
 
+.app-loading-screen {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: var(--space-xl);
+  background:
+    linear-gradient(180deg, rgba(20, 26, 22, 0.92), rgba(11, 14, 12, 0.98)),
+    var(--bg-primary);
+}
+
+.app-loading-shell {
+  width: min(440px, 100%);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-lg);
+  padding: var(--space-2xl);
+  background: rgba(23, 28, 24, 0.78);
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-xl);
+  backdrop-filter: blur(18px);
+}
+
+.app-loading-mark {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  color: var(--text-primary);
+  font-size: var(--font-size-lg);
+  font-weight: 800;
+}
+
+.app-loading-copy h1 {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: var(--font-size-2xl);
+  line-height: 1.1;
+}
+
+.app-loading-copy p {
+  margin: var(--space-sm) 0 0;
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+}
+
+.app-loading-bar {
+  position: relative;
+  height: 4px;
+  overflow: hidden;
+  border-radius: var(--radius-full);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.app-loading-bar span {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 38%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--accent-mint), var(--accent-cyan));
+  animation: loadingSweep 1.25s ease-in-out infinite;
+}
+
 .auth-panel {
   width: min(420px, 100%);
   display: flex;
@@ -466,6 +528,15 @@ select.input option {
   0% { background-position: 0% 50%; }
   50% { background-position: 100% 50%; }
   100% { background-position: 0% 50%; }
+}
+
+@keyframes loadingSweep {
+  0% {
+    transform: translateX(-115%);
+  }
+  100% {
+    transform: translateX(285%);
+  }
 }
 
 .animate-fade-in {
@@ -1522,6 +1593,33 @@ select.input option {
   flex-shrink: 0;
 }
 
+.spec-quality-bar {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-sm);
+}
+
+.spec-quality-bar > div {
+  padding: var(--space-md);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-glass);
+  border-radius: var(--radius-md);
+}
+
+.spec-quality-label {
+  display: block;
+  margin-bottom: var(--space-xs);
+  color: var(--text-muted);
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.spec-quality-bar strong {
+  color: var(--text-primary);
+  font-size: var(--font-size-sm);
+}
+
 .spec-tips {
   display: flex;
   gap: var(--space-sm);
@@ -1590,6 +1688,14 @@ select.input option {
   box-shadow: 0 0 0 3px rgba(143, 184, 168, 0.12);
 }
 
+.spec-edit-helper {
+  padding: var(--space-sm) var(--space-lg);
+  color: var(--text-secondary);
+  font-size: var(--font-size-xs);
+  border-bottom: 1px solid var(--border-glass);
+  background: rgba(143, 184, 168, 0.06);
+}
+
 .spec-textarea {
   flex: 1;
   width: 100%;
@@ -1627,6 +1733,44 @@ select.input option {
   border-radius: 50%;
   background: var(--accent-cyan);
   animation: pulseGlow 1s ease-in-out infinite;
+}
+
+.spec-audit-layout {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(240px, 320px) minmax(0, 1fr);
+  gap: var(--space-md);
+}
+
+.spec-audit-summary {
+  padding: var(--space-lg);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-glass);
+  border-radius: var(--radius-lg);
+  overflow-y: auto;
+}
+
+.spec-audit-summary h3 {
+  margin: 0 0 var(--space-md);
+  font-size: var(--font-size-base);
+}
+
+.spec-audit-card {
+  padding: var(--space-sm) var(--space-md);
+  margin-bottom: var(--space-sm);
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+  line-height: 1.5;
+  background: rgba(251, 191, 36, 0.08);
+  border: 1px solid rgba(251, 191, 36, 0.18);
+  border-radius: var(--radius-md);
+}
+
+.spec-audit-card.muted {
+  color: var(--text-muted);
+  background: var(--bg-glass);
+  border-color: var(--border-glass);
 }
 
 .spec-actions {
@@ -2163,6 +2307,14 @@ select.input option {
 
   .spec-tips {
     flex-direction: column;
+  }
+
+  .spec-quality-bar {
+    grid-template-columns: 1fr;
+  }
+
+  .spec-audit-layout {
+    grid-template-columns: 1fr;
   }
 
   .prefs-section {
