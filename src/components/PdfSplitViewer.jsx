@@ -45,6 +45,7 @@ export default function PdfSplitViewer({ pdfUrl, activePage = 1, sourceText = ''
   const [pdf, setPdf] = useState(null);
   const [pageNumber, setPageNumber] = useState(activePage || 1);
   const [numPages, setNumPages] = useState(0);
+  const [zoom, setZoom] = useState(1);
   const [highlights, setHighlights] = useState([]);
   const [fallbackHighlight, setFallbackHighlight] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
@@ -95,7 +96,8 @@ export default function PdfSplitViewer({ pdfUrl, activePage = 1, sourceText = ''
 
       const containerWidth = canvasRef.current.parentElement?.clientWidth || 720;
       const baseViewport = page.getViewport({ scale: 1 });
-      const scale = Math.min(Math.max((containerWidth - 32) / baseViewport.width, 0.8), 1.8);
+      const fitScale = Math.min(Math.max((containerWidth - 32) / baseViewport.width, 0.8), 1.8);
+      const scale = Math.min(Math.max(fitScale * zoom, 0.5), 3);
       const viewport = page.getViewport({ scale });
       const canvas = canvasRef.current;
       const context = canvas.getContext('2d');
@@ -146,25 +148,44 @@ export default function PdfSplitViewer({ pdfUrl, activePage = 1, sourceText = ''
         renderTaskRef.current = null;
       }
     };
-  }, [pdf, pageNumber, searchTokens]);
+  }, [pdf, pageNumber, searchTokens, zoom]);
 
   const goToPage = (nextPage) => {
     if (!numPages) return;
     setPageNumber(Math.min(Math.max(nextPage, 1), numPages));
   };
 
+  const changeZoom = (nextZoom) => {
+    setZoom(Math.min(Math.max(nextZoom, 0.6), 2.5));
+  };
+
   return (
     <div className="pdf-split-viewer">
       <div className="pdf-split-toolbar">
-        <button className="btn btn-ghost" onClick={() => goToPage(pageNumber - 1)} disabled={pageNumber <= 1}>
-          ←
-        </button>
-        <span className="pdf-split-page-label">
-          Página {pageNumber}{numPages ? ` de ${numPages}` : ''}
-        </span>
-        <button className="btn btn-ghost" onClick={() => goToPage(pageNumber + 1)} disabled={pageNumber >= numPages}>
-          →
-        </button>
+        <div className="pdf-toolbar-group">
+          <button className="btn btn-ghost" onClick={() => goToPage(pageNumber - 1)} disabled={pageNumber <= 1}>
+            ←
+          </button>
+          <span className="pdf-split-page-label">
+            Página {pageNumber}{numPages ? ` de ${numPages}` : ''}
+          </span>
+          <button className="btn btn-ghost" onClick={() => goToPage(pageNumber + 1)} disabled={pageNumber >= numPages}>
+            →
+          </button>
+        </div>
+
+        <div className="pdf-toolbar-group">
+          <button className="btn btn-ghost" onClick={() => changeZoom(zoom - 0.15)} disabled={zoom <= 0.6}>
+            -
+          </button>
+          <span className="pdf-zoom-label">{Math.round(zoom * 100)}%</span>
+          <button className="btn btn-ghost" onClick={() => changeZoom(zoom + 0.15)} disabled={zoom >= 2.5}>
+            +
+          </button>
+          <button className="btn btn-secondary" onClick={() => setZoom(1)}>
+            Ajustar
+          </button>
+        </div>
       </div>
 
       <div className="pdf-canvas-scroll">

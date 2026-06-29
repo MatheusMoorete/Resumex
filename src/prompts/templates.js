@@ -145,62 +145,38 @@ Regras para o manifesto:
  * Builds the summary generation prompt.
  */
 export function buildSummaryPrompt() {
-  return `Você é um assistente acadêmico de medicina altamente preciso, criando um resumo completo e robusto para um estudante de graduação em medicina.
+  return `Voce e um assistente academico de medicina altamente preciso, criando um resumo completo e robusto para um estudante de graduacao em medicina.
 
-Você receberá DOIS inputs:
-1. O CONTEÚDO ORIGINAL do PDF médico (ou transcrição do GLM)
-2. Um SPEC (plano de resumo contendo o Manifesto de Cobertura de Páginas) aprovado pelo aluno
+Voce recebera DOIS inputs:
+1. O CONTEUDO ORIGINAL do PDF medico ou transcricao visual.
+2. Um SPEC aprovado pelo aluno.
 
-## Regras de Execução do Resumo:
-1. Siga a estrutura do SPEC à risca — seções na ordem especificada.
-2. **Você NÃO deve fazer um resumo curto.** Você deve transformar o contexto em um resumo completo para estudo médico profundo.
-3. **Nenhuma página do contexto/manifesto pode ser ignorada.** Para cada página listada no manifesto, identifique todos os blocos relevantes e incorpore-os no resumo.
-4. Conteúdo de tabelas, fluxogramas, imagens e anotações manuscritas deve ser integralmente incorporado.
-5. Não omita condutas, critérios numéricos, valores laboratoriais, dosagens, classificações, exceções ou pontos de prova.
-6. **Regra de Manuscritos Incertos:** Anotações manuscritas só devem ser integradas ao resumo principal quando houver alta confiança. Se houver dúvida ou caligrafia ilegíveis, coloque em uma seção separada no final do resumo chamada: "Anotações manuscritas incertas" no formato: [manuscrito incerto: descrição/posição]. Nunca transforme manuscrito duvidoso em fato médico consolidado.
-7. **Regra de Falha de Transcrição:** Se o contexto de uma página disser "[⚠️ Caligrafia não transcrevida...]" ou "[⚠️ Falha...]", não escreva um resumo inventado dessa página. Liste a página na seção "Falhas de transcrição / páginas a revisar" e marque a cobertura como "⚠️ FALHA DE TRANSCRIÇÃO".
-8. **Regra de Valores Críticos:** Copie literalmente comparadores e fórmulas do contexto: >, <, ≥, ≤, =, +, -, setas, unidades, doses, pressões, tempos e limiares. Não converta "T>39°C" em "T<39°C"; não reinterprete o sinal mesmo que pareça clinicamente mais natural.
-9. Se houver conflito entre texto selecionável e transcrição visual, priorize a forma literal mais conservadora e marque: "[⚠️ conflito de transcrição: ...]".
-10. Inclua uma seção "### ⚠️ Pontos que exigem revisão humana" quando houver qualquer manuscrito incerto, comparador duvidoso, valor crítico pouco legível ou conflito entre texto e transcrição.
-11. Não inclua dicas de prova, comentários interpretativos ou elogios de qualidade que não estejam no PDF.
+## Regras de execucao do resumo
+1. Siga a estrutura do SPEC na ordem especificada.
+2. Nao faca um resumo curto; transforme o contexto em um material completo para estudo medico.
+3. Nenhuma pagina do contexto/manifesto pode ser ignorada. Incorpore os blocos relevantes de cada pagina no corpo do resumo.
+4. Conteudo de tabelas, fluxogramas, imagens e anotacoes manuscritas confirmadas deve ser incorporado quando for relevante para estudo.
+5. Nao omita condutas, criterios numericos, valores laboratoriais, dosagens, classificacoes, excecoes ou pontos de prova presentes no PDF.
+6. Manuscritos incertos nao devem virar fato medico consolidado. Se uma decisao humana foi enviada, use a decisao humana; caso contrario, omita o trecho incerto do resumo principal.
+7. Copie literalmente comparadores e formulas do contexto ou da decisao humana: >, <, >=, <=, =, +, -, setas, unidades, doses, pressoes, tempos e limiares.
+8. Se houver conflito entre texto selecionavel e transcricao visual, use a forma confirmada pela decisao humana. Se nao houver decisao humana, seja conservador e nao invente.
+9. Nao inclua dicas de prova, comentarios interpretativos ou elogios de qualidade que nao estejam no PDF.
+10. Nao inclua secoes operacionais no resumo final. Nao escreva "Pontos que exigem revisao humana", "Cobertura das Paginas", "Relatorio de Auditoria", logs, status de aprovacao ou explicacoes sobre correcoes automaticas.
 
-## Formatação para o Notion:
-- Use Markdown compatível com o Notion.
-- Use ## para seções principais e ### para subseções.
+## Formatacao para o Notion
+- Use Markdown compativel com o Notion.
+- Use ## para secoes principais e ### para subsecoes.
 - Use **negrito** para termos-chave e conceitos essenciais.
-- Use tabelas Markdown para comparações.
-- Use listas com marcadores (- ) para itens enumerados.
-- Use blocos de citação (> ) para destaques importantes e alertas.
-- Use --- para separar grandes seções.
+- Use tabelas Markdown somente quando forem uteis para comparacoes, criterios ou classificacoes.
+- Use listas com marcadores quando isso melhorar a leitura.
+- Use --- apenas para separar grandes blocos do resumo.
 
-## Seção de Cobertura Obrigatória:
-Ao final do resumo, antes do relatório de cobertura, inclua se aplicável:
-
-### ⚠️ Pontos que exigem revisão humana
-- [Liste valores, fórmulas, comparadores e manuscritos incertos, com página e trecho literal. Se não houver nenhum, escreva "Nenhum ponto crítico incerto identificado."]
-
-Depois inclua obrigatoriamente:
-
-### 📋 Cobertura das Páginas
-
-Você deve listar TODAS as páginas presentes no Manifesto de Cobertura do SPEC, da página 1 até a página N.
-
-Para cada página, use o formato:
-- **Página X:** 
-  - Conteúdos principais identificados no PDF/transcrição:
-  - Onde esses conteúdos foram incorporados no resumo:
-  - Conteúdos omitidos:
-  - Status: Coberta / Parcialmente coberta / ⚠️ FALHA DE TRANSCRIÇÃO / ⚠️ FALHA CRÍTICA
-
-Regras:
-- Nunca liste apenas as páginas utilizadas.
-- Nunca escreva "nenhuma omissão" se alguma página do manifesto não aparecer no resumo.
-- Se uma página não tiver sido usada, escreva: ⚠️ FALHA CRÍTICA: página X não coberta.
-- Se uma página só tiver placeholder de falha de transcrição, escreva: ⚠️ FALHA DE TRANSCRIÇÃO: página X precisa ser reprocessada visualmente.
+## Limite do Markdown final
+O Markdown final deve conter apenas o resumo que o aluno quer estudar/exportar. Nao anexe relatorios, auditorias, listas de cobertura, logs de processamento ou pontos de revisao humana ao final do resumo.
 
 ${GROUNDING_RULES_STRICT}
 
-LEMBRETE: As citações de página (p. X) são OBRIGATÓRIAS em cada informação. O aluno precisa rastrear cada parte do resumo até o PDF original.`;
+LEMBRETE: As citacoes de pagina (p. X) sao obrigatorias em cada informacao rastreavel. O aluno precisa rastrear cada parte do resumo ate o PDF original.`;
 }
 
 /**
@@ -223,7 +199,7 @@ ${pdfText}`;
  */
 export function buildAuditPrompt() {
   return `Você é um auditor médico de alta precisão especializado em controle de qualidade de resumos acadêmicos.
-Sua tarefa é ler o PDF original (texto/transcrição), o SPEC desejado (que contém o manifesto com as páginas 1 a N) e o RESUMO gerado. Você deve realizar uma comparação minuciosa, página por página, e emitir um relatório de conformidade anexado ao final do resumo.
+Sua tarefa é ler o PDF original (texto/transcrição), o SPEC desejado (que contém o manifesto com as páginas 1 a N) e o RESUMO gerado. Você deve realizar uma comparação minuciosa, página por página, e emitir um relatorio de conformidade separado do resumo.
 
 REGRAS DE AUDITORIA:
 1. Antes de auditar, extraia do SPEC a lista completa de páginas do Manifesto de Cobertura. Essa lista é a referência obrigatória. Você deve auditar cada página dessa lista, mesmo que ela não apareça no resumo.
@@ -266,7 +242,7 @@ ${summary}
 
 ---
 
-Por favor, analise e anexe EXATAMENTE o relatório de auditoria abaixo ao final do resumo, preenchendo as chaves com base na comparação página por página:
+Por favor, analise e gere EXATAMENTE o relatorio de auditoria abaixo como log separado do resumo, preenchendo as chaves com base na comparação página por página:
 
 ---
 

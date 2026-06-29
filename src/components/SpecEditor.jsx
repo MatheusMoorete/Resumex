@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { formatFileSize } from '../services/pdfExtractor';
 import MarkdownPreview from './MarkdownPreview';
+import PdfSplitViewer from './PdfSplitViewer';
 
 function getAuditStatus(specAudit) {
   if (!specAudit) return 'Pendente';
@@ -38,10 +39,12 @@ export default function SpecEditor({
   onBack,
 }) {
   const [viewMode, setViewMode] = useState('preview');
+  const [pdfReviewItem, setPdfReviewItem] = useState(null);
   const textareaRef = useRef(null);
   const auditStatus = getAuditStatus(specAudit);
   const auditIssues = getAuditIssues(specAudit);
   const unresolvedRiskCount = highRiskItems.filter((item) => !isRiskDecisionResolved(riskDecisions[item.id])).length;
+  const completedRiskCount = highRiskItems.length - unresolvedRiskCount;
 
   useEffect(() => {
     if (isGenerating) setViewMode('preview');
@@ -52,6 +55,14 @@ export default function SpecEditor({
       textareaRef.current.scrollTop = textareaRef.current.scrollHeight;
     }
   }, [spec, isGenerating, viewMode]);
+
+  const handlePrimaryAction = () => {
+    if (unresolvedRiskCount > 0) {
+      setViewMode('risk');
+      return;
+    }
+    onGenerate();
+  };
 
   return (
     <div className="spec-section">
@@ -128,22 +139,84 @@ export default function SpecEditor({
         </div>
       )}
 
+      {!isGenerating && unresolvedRiskCount > 0 && viewMode !== 'risk' && (
+        <button
+          type="button"
+          className="spec-review-alert"
+          onClick={() => setViewMode('risk')}
+        >
+          <span>
+            A IA corrigiu automaticamente o plano, mas ainda restaram {unresolvedRiskCount} {unresolvedRiskCount === 1 ? 'ponto' : 'pontos'} de baixa confianca.
+          </span>
+          <strong>Revisar agora</strong>
+        </button>
+      )}
+
       <div className="spec-editor-container">
         {(viewMode === 'preview' || isGenerating) && (
           <div className={`spec-preview-wrapper ${isGenerating ? 'generating' : ''}`}>
-            <div className="spec-preview-content" id="spec-preview">
-              {spec ? (
-                <MarkdownPreview content={spec} />
-              ) : (
-                <div style={{ color: 'var(--text-muted)', textAlign: 'center', padding: 'var(--space-3xl)' }}>
-                  {isGenerating ? 'Gerando plano...' : 'Nenhum plano gerado ainda.'}
+            {isGenerating ? (
+              <div className="spec-generation-layout">
+                <aside className="spec-generation-status">
+                  <span className="spec-generation-kicker">Preparando plano</span>
+                  <h3>Transformando a leitura em uma SPEC auditavel</h3>
+                  <p>
+                    Estamos organizando as evidencias por pagina, aplicando suas preferencias e checando inconsistencias antes da revisao final.
+                  </p>
+                  <div className="spec-generation-steps">
+                    <div className="spec-generation-step done">
+                      <span />
+                      <strong>Material analisado</strong>
+                    </div>
+                    <div className={`spec-generation-step ${spec ? 'done' : 'active'}`}>
+                      <span />
+                      <strong>Estrutura do plano</strong>
+                    </div>
+                    <div className={`spec-generation-step ${spec ? 'active' : ''}`}>
+                      <span />
+                      <strong>Auditoria e correcao</strong>
+                    </div>
+                  </div>
+                  <div className="spec-generation-facts">
+                    <div>
+                      <span>Paginas</span>
+                      <strong>{fileData.numPages}</strong>
+                    </div>
+                    <div>
+                      <span>Arquivo</span>
+                      <strong>{formatFileSize(fileData.size)}</strong>
+                    </div>
+                  </div>
+                </aside>
+                <div className="spec-generation-preview">
+                  {spec ? (
+                    <MarkdownPreview content={spec} />
+                  ) : (
+                    <div className="spec-skeleton">
+                      <span />
+                      <span />
+                      <span />
+                      <span />
+                      <span />
+                    </div>
+                  )}
                 </div>
-              )}
-            </div>
+              </div>
+            ) : (
+              <div className="spec-preview-content" id="spec-preview">
+                {spec ? (
+                  <MarkdownPreview content={spec} />
+                ) : (
+                  <div style={{ color: 'var(--text-muted)', textAlign: 'center', padding: 'var(--space-3xl)' }}>
+                    Nenhum plano gerado ainda.
+                  </div>
+                )}
+              </div>
+            )}
             {isGenerating && (
               <div className="spec-generating-indicator">
                 <span className="spec-generating-dot" />
-                <span>Preparando plano auditado...</span>
+                <span>Gerando plano auditado. Esta etapa pode levar alguns segundos apos a leitura das paginas.</span>
               </div>
             )}
           </div>
@@ -199,7 +272,7 @@ export default function SpecEditor({
             <div className="spec-risk-header">
               <h3>Revisao obrigatoria de alto risco</h3>
               <p>
-                Confirme trechos incertos que podem alterar valores, condutas, classificacoes ou protocolos.
+                Confirme trechos incertos que podem alterar valores, condutas, classificacoes ou protocolos. {completedRiskCount} de {highRiskItems.length} revisados.
               </p>
             </div>
 
@@ -215,11 +288,20 @@ export default function SpecEditor({
                   return (
                     <div className={`spec-risk-card ${resolved ? 'resolved' : ''}`} key={item.id}>
                       <div className="spec-risk-card-header">
-                        <span>Pagina {item.page}</span>
+                        <span>Pagina {item.page}{item.section ? ` · ${item.section}` : ''}</span>
                         <strong>{resolved ? 'Resolvido' : 'Pendente'}</strong>
                       </div>
                       <div className="spec-risk-text">{item.text}</div>
                       <div className="spec-risk-reason">{item.reason}</div>
+                      {fileData.pdfUrl && (
+                        <button
+                          type="button"
+                          className="spec-risk-pdf-button"
+                          onClick={() => setPdfReviewItem(item)}
+                        >
+                          Ver pagina no PDF
+                        </button>
+                      )}
 
                       <div className="spec-risk-actions">
                         <button
@@ -269,13 +351,38 @@ export default function SpecEditor({
           </button>
           <button
             className="btn btn-primary btn-lg"
-            onClick={onGenerate}
-            disabled={!spec.trim() || unresolvedRiskCount > 0}
+            onClick={handlePrimaryAction}
+            disabled={!spec.trim()}
             id="generate-from-spec-button"
-            title={unresolvedRiskCount > 0 ? 'Resolva os riscos criticos antes de gerar o resumo.' : undefined}
+            title={unresolvedRiskCount > 0 ? 'Abrir revisao critica para decidir os riscos pendentes.' : undefined}
           >
             {unresolvedRiskCount > 0 ? `Resolver ${unresolvedRiskCount} riscos` : 'Gerar resumo final'}
           </button>
+        </div>
+      )}
+
+      {pdfReviewItem && (
+        <div className="pdf-review-overlay" role="dialog" aria-modal="true">
+          <div className="pdf-review-modal">
+            <div className="pdf-review-header">
+              <div>
+                <span>Referencia original</span>
+                <h3>Pagina {pdfReviewItem.page}</h3>
+              </div>
+              <button
+                type="button"
+                className="btn btn-ghost"
+                onClick={() => setPdfReviewItem(null)}
+              >
+                Fechar
+              </button>
+            </div>
+            <PdfSplitViewer
+              pdfUrl={fileData.pdfUrl}
+              activePage={pdfReviewItem.page}
+              sourceText={`${pdfReviewItem.text}\n${pdfReviewItem.context || ''}`}
+            />
+          </div>
         </div>
       )}
     </div>

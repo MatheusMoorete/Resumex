@@ -118,6 +118,7 @@ export default function PreferencesPanel({
   const missingKeyName = getRequiredKeyMissing();
   const isKeyMissing = !!missingKeyName;
   const hasInvalidManualPages = parsedManualPages.invalid.length > 0;
+  const hasNoFormats = formats.length === 0;
 
   const handleContinue = () => {
     onContinue({
@@ -282,6 +283,12 @@ export default function PreferencesPanel({
           </div>
         )}
 
+        {hasNoFormats && (
+          <div className="upload-error prefs-key-warning">
+            Selecione pelo menos um formato para o resumo.
+          </div>
+        )}
+
         <div className="prefs-actions compact">
           <button className="btn btn-secondary" onClick={onBack}>
             Voltar
@@ -289,7 +296,7 @@ export default function PreferencesPanel({
           <button
             className="btn btn-primary btn-lg"
             onClick={handleContinue}
-            disabled={isKeyMissing || (handwritingMode === 'manual' && hasInvalidManualPages)}
+            disabled={isKeyMissing || hasNoFormats || (handwritingMode === 'manual' && hasInvalidManualPages)}
             id="continue-to-spec"
           >
             Gerar plano · {pagesSentToGlm.length} páginas com visão

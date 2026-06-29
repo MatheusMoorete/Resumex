@@ -11,11 +11,7 @@ export default function Header({ deepseekKey, zhipuKey, deepseekAvailable, zhipu
   return (
     <header className="header">
       <div className="header-logo">
-        <div className="header-logo-icon">Rx</div>
-        <span className="header-logo-text">
-          <span className="gradient-text">ResumeX</span>
-        </span>
-        <span className="header-logo-badge">MVP</span>
+        <span className="header-logo-wordmark">Resumex</span>
       </div>
 
       <div className="header-actions">

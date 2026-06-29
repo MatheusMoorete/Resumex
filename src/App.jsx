@@ -114,7 +114,9 @@ function extractHighRiskEvidenceItems(evidenceMap) {
   let page = null;
   let section = '';
 
-  evidenceMap.split('\n').forEach((rawLine) => {
+  const lines = evidenceMap.split('\n');
+
+  lines.forEach((rawLine, lineIndex) => {
     const line = rawLine.trim();
     if (!line) return;
 
@@ -138,11 +140,25 @@ function extractHighRiskEvidenceItems(evidenceMap) {
     const isHighRisk = HIGH_RISK_PATTERN.test(line);
 
     if (page && inRiskSection && isPotentiallyUncertain && isHighRisk) {
+      const context = lines
+        .slice(Math.max(0, lineIndex - 3), Math.min(lines.length, lineIndex + 4))
+        .map((contextLine) => contextLine.trim())
+        .filter((contextLine) => (
+          contextLine
+          && contextLine !== line
+          && !/^#{1,3}\s+/.test(contextLine)
+          && !/^---/.test(contextLine)
+        ))
+        .slice(0, 4)
+        .map((contextLine) => contextLine.replace(/^[-*]\s*/, ''))
+        .join('\n');
+
       items.push({
         id: `p${page}-${items.length}`,
         page,
         section,
         text: line.replace(/^[-*]\s*/, ''),
+        context,
         reason: 'Pode alterar valor, conduta, classificacao, protocolo ou interpretacao clinica.',
       });
     }
@@ -169,6 +185,82 @@ function buildRiskReviewNotes(highRiskItems, riskDecisions) {
   });
 
   return `## DECISOES HUMANAS SOBRE MANUSCRITOS/VALORES INCERTOS\n\n${lines.join('\n')}`;
+}
+
+function splitOperationalSections(markdown) {
+  const source = String(markdown || '').trim();
+  if (!source) return { summary: '', log: '' };
+
+  const operationalHeadingRegex = /^#{2,3}\s*(?:[^\n\wÀ-ÿ#]*\s*)?(Pontos que exigem revisão humana|Pontos que exigem revisao humana|Cobertura das Páginas|Cobertura das Paginas|Relatório de Auditoria Automática|Relatorio de Auditoria Automatica)\b/im;
+  const match = operationalHeadingRegex.exec(source);
+
+  if (!match) return { summary: source, log: '' };
+
+  return {
+    summary: source.slice(0, match.index).trim(),
+    log: source.slice(match.index).trim(),
+  };
+}
+
+function buildOutputPreferenceInstructions(preferences) {
+  const method = preferences?.method?.name || 'Livre';
+  const detail = preferences?.detailLevel?.label || 'Equilibrado';
+  const formats = preferences?.formats || [];
+  const formatIds = formats.map((format) => format.id);
+  const formatLabels = formats.map((format) => format.label).join(', ') || 'nao definido';
+
+  const rules = [
+    '## PREFERENCIAS DE SAIDA DO USUARIO',
+    `- Metodo selecionado: ${method}.`,
+    `- Formatos selecionados: ${formatLabels}.`,
+    `- Profundidade selecionada: ${detail}.`,
+    '',
+    'Estas preferencias tem prioridade sobre instrucoes genericas de formatacao.',
+  ];
+
+  if (formatIds.includes('text') && !formatIds.includes('bullets')) {
+    rules.push('- Usar texto corrido como formato principal. Evitar listas longas de bullets.');
+  }
+  if (formatIds.includes('bullets')) {
+    rules.push('- Usar bullet points para organizar informacoes e revisao rapida.');
+  }
+  if (formatIds.includes('tables')) {
+    rules.push('- Usar tabelas somente para comparacoes, classificacoes, criterios ou condutas paralelas.');
+  } else {
+    rules.push('- Nao usar tabelas, salvo se a SPEC editada pelo usuario pedir explicitamente uma tabela especifica.');
+  }
+  if (formatIds.includes('qa')) {
+    rules.push('- Incluir blocos de perguntas e respostas para recordacao ativa.');
+  }
+  if (formatIds.includes('mnemonics')) {
+    rules.push('- Incluir mnemonicos apenas quando forem diretamente derivados do conteudo do PDF.');
+  }
+  if (formatIds.includes('flashcards')) {
+    rules.push('- Incluir flashcards curtos no formato Frente / Verso.');
+  }
+  if (formatIds.length === 1 && formatIds[0] === 'text') {
+    rules.push('- Nao transformar o resumo em bullet points. Use paragrafos com subtitulos.');
+  }
+
+  if (preferences?.detailLevel?.id === 'concise') {
+    rules.push('- Ser conciso: priorizar o essencial, sem expandir explicacoes alem do necessario.');
+  } else if (preferences?.detailLevel?.id === 'detailed') {
+    rules.push('- Ser detalhado: preservar explicacoes, excecoes, criterios e pontos finos do material.');
+  } else {
+    rules.push('- Manter equilibrio: detalhar criterios e condutas sem expandir conteudo desnecessario.');
+  }
+
+  if (preferences?.method?.id === 'clinical') {
+    rules.push('- Estruturar com foco clinico: definicao, achados, criterios, conduta e pontos de atencao.');
+  } else if (preferences?.method?.id === 'active-recall') {
+    rules.push('- Priorizar perguntas de verificacao e recuperacao ativa ao final de cada grande secao.');
+  } else if (preferences?.method?.id === 'cornell') {
+    rules.push('- Organizar em formato Cornell: pistas/perguntas, anotacoes principais e resumo curto por bloco.');
+  } else if (preferences?.method?.id === 'cheatsheet') {
+    rules.push('- Organizar como consulta rapida: criterios, limiares, condutas e comparacoes essenciais.');
+  }
+
+  return rules.join('\n');
 }
 
 function isRiskDecisionResolved(decision) {
@@ -208,6 +300,7 @@ export default function App() {
   const [specCorrectionCount, setSpecCorrectionCount] = useState(0);
   const [riskDecisions, setRiskDecisions] = useState({});
   const [summary, setSummary] = useState('');
+  const [summaryLog, setSummaryLog] = useState('');
   const [isAuditing, setIsAuditing] = useState(false);
   const [missingPages, setMissingPages] = useState([]);
   const [coverageReinforcementInstruction, setCoverageReinforcementInstruction] = useState('');
@@ -303,6 +396,7 @@ export default function App() {
     });
     setSpec('# SPEC Mock E2E\n\nValidar exportacao para o Notion sem consumir tokens.');
     setSummary(mockSummary);
+    setSummaryLog('');
     setMissingPages([]);
     setAppState('result');
   }, []);
@@ -485,6 +579,7 @@ export default function App() {
     const specPrompt = buildSpecPrompt(prefsToUse);
     const specAuditPrompt = buildSpecAuditPrompt();
     const specCorrectionPrompt = buildSpecCorrectionPrompt();
+    const outputPreferenceInstructions = buildOutputPreferenceInstructions(prefsToUse);
 
     try {
       let generatedEvidenceMap = '';
@@ -505,7 +600,7 @@ export default function App() {
       let generatedSpec = '';
       await generateSummary({
         apiKey: deepseekKey,
-        pdfText: buildSpecFromEvidenceUserMessage(generatedEvidenceMap),
+        pdfText: `${outputPreferenceInstructions}\n\n---\n\n${buildSpecFromEvidenceUserMessage(generatedEvidenceMap)}`,
         systemPrompt: specPrompt,
         onChunk: (chunk) => {
           generatedSpec += chunk;
@@ -581,6 +676,7 @@ export default function App() {
 
     setAppState('processing');
     setSummary('');
+    setSummaryLog('');
     setIsAuditing(false);
     setError('');
 
@@ -590,12 +686,13 @@ export default function App() {
     const rawContext = contextBase || fileData.contextBase || fileData.text;
     const evidenceContext = evidenceMap || fileData.evidenceMap || '';
     const riskReviewNotes = buildRiskReviewNotes(highRiskItems, riskDecisions);
+    const outputPreferenceInstructions = buildOutputPreferenceInstructions(preferences);
     const textContext = evidenceContext
       ? `## MAPA DE EVIDENCIAS VALIDADO\n\n${evidenceContext}\n\n---\n\n## CONTEXTO BRUTO DO PDF\n\n${rawContext}`
       : rawContext;
     
     // Inject reinforcement instructions at the beginning of user message if present
-    let userMessage = buildSummaryUserMessage(textContext, spec);
+    let userMessage = `${outputPreferenceInstructions}\n\n---\n\n${buildSummaryUserMessage(textContext, spec)}`;
     if (riskReviewNotes) {
       userMessage = `${riskReviewNotes}\n\n---\n\n${userMessage}`;
     }
@@ -608,7 +705,9 @@ export default function App() {
       let finalSummary = '';
       const onSummaryChunk = (chunk) => {
         finalSummary += chunk;
-        setSummary(finalSummary);
+        const split = splitOperationalSections(finalSummary);
+        setSummary(split.summary);
+        setSummaryLog(split.log);
       };
 
       await generateSummary({
@@ -619,16 +718,22 @@ export default function App() {
         signal: abortControllerRef.current.signal,
       });
 
+      const splitGenerated = splitOperationalSections(finalSummary);
+      finalSummary = splitGenerated.summary;
+      setSummary(finalSummary);
+      setSummaryLog(splitGenerated.log);
+
       // 2. Perform Automatic Audit
       setIsAuditing(true);
       
       const auditPrompt = buildAuditPrompt();
       const auditUserMessage = buildAuditUserMessage(textContext, spec, finalSummary);
-      let auditReport = '\n\n';
+      let auditReport = '';
 
       const onAuditChunk = (chunk) => {
         auditReport += chunk;
-        setSummary(finalSummary + auditReport);
+        const combinedLog = [splitGenerated.log, auditReport.trim()].filter(Boolean).join('\n\n---\n\n');
+        setSummaryLog(combinedLog);
       };
 
       await generateSummary({
@@ -640,8 +745,7 @@ export default function App() {
       });
 
       // 3. Scan for page coverage programmatically
-      const totalOutput = finalSummary + auditReport;
-      const missing = getMissingPages(totalOutput, fileData.numPages);
+      const missing = getMissingPages(finalSummary, fileData.numPages);
       setMissingPages(missing);
 
       setIsAuditing(false);
@@ -710,6 +814,7 @@ Você DEVE obrigatoriamente incluir e detalhar todas as informações, critério
     setSpecCorrectionCount(0);
     setRiskDecisions({});
     setSummary('');
+    setSummaryLog('');
     setIsAuditing(false);
     setMissingPages([]);
     setCoverageReinforcementInstruction('');
@@ -729,6 +834,8 @@ Você DEVE obrigatoriamente incluir e detalhar todas as informações, critério
     setSpecAudit('');
     setSpecCorrectionCount(0);
     setRiskDecisions({});
+    setSummary('');
+    setSummaryLog('');
     setMissingPages([]);
     setCoverageReinforcementInstruction('');
     setAppState('upload');
@@ -741,6 +848,8 @@ Você DEVE obrigatoriamente incluir e detalhar todas as informações, critério
     setSpecAudit('');
     setSpecCorrectionCount(0);
     setRiskDecisions({});
+    setSummary('');
+    setSummaryLog('');
     setMissingPages([]);
     setCoverageReinforcementInstruction('');
     setAppState('preferences');
@@ -751,8 +860,7 @@ Você DEVE obrigatoriamente incluir e detalhar todas as informações, critério
       <div className="app-loading-screen">
         <div className="app-loading-shell">
           <div className="app-loading-mark">
-            <div className="header-logo-icon">Rx</div>
-            <span>ResumeX</span>
+            <span className="header-logo-wordmark">Resumex</span>
           </div>
           <div className="app-loading-copy">
             <h1>Preparando ambiente</h1>
@@ -806,9 +914,8 @@ Você DEVE obrigatoriamente incluir e detalhar todas as informações, critério
       <div className="auth-screen">
         <div className="auth-panel">
           <div className="auth-brand">
-            <div className="header-logo-icon">Rx</div>
             <div>
-              <h1>ResumeX</h1>
+              <h1>Resumex</h1>
               <p>Acesso não autorizado</p>
             </div>
           </div>
@@ -925,6 +1032,7 @@ Você DEVE obrigatoriamente incluir e detalhar todas as informações, critério
           <ResultView
             pdfUrl={fileData?.pdfUrl}
             summary={summary}
+            summaryLog={summaryLog}
             missingPages={missingPages}
             onRegenerateWithCoverage={handleRegenerateWithCoverage}
             onNewSummary={handleNewSummary}
