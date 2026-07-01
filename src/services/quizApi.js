@@ -3,6 +3,7 @@ import { buildAuthHeaders } from './authClient';
 const API_URL = '/api/deepseek/chat/completions';
 const MAX_CONTEXT_CHARS = 70000;
 const MAX_FILE_CHARS = 24000;
+const MAX_QUESTIONS_PER_CALL = 10;
 
 function extractJsonObject(text) {
   const source = String(text || '').trim();
@@ -231,9 +232,36 @@ function normalizeQuestions(payload, origin) {
     ));
 }
 
-async function extractExistingQuestions({ apiKey, files, theoryContext, questionCount, signal }) {
+function buildSkipList(questions) {
+  return questions
+    .map((question, index) => `${index + 1}. ${question.stem.slice(0, 180)}`)
+    .join('\n');
+}
+
+function dedupeQuestions(questions) {
+  const seen = new Set();
+  const unique = [];
+
+  for (const question of questions) {
+    const key = question.stem
+      .toLowerCase()
+      .replace(/\s+/g, ' ')
+      .replace(/[^\wÀ-ÿ ]/g, '')
+      .trim()
+      .slice(0, 180);
+
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    unique.push(question);
+  }
+
+  return unique;
+}
+
+async function extractExistingQuestionsBatch({ apiKey, files, theoryContext, questionCount, usedQuestions, signal }) {
   const questionBankContext = buildQuestionBankContext(files);
   if (!questionBankContext.trim()) return [];
+  const skipList = buildSkipList(usedQuestions);
 
   const payload = await callDeepSeekJson({
     apiKey,
@@ -250,6 +278,9 @@ Objetivo:
 - Responda somente JSON valido.
 - Nao use Markdown, comentarios, trailing commas nem texto antes/depois do JSON.`,
     user: `Extraia ate ${questionCount} questoes existentes dos bancos abaixo.
+
+Evite extrair questoes iguais ou muito parecidas com estas ja usadas:
+${skipList || 'Nenhuma.'}
 
 Formato obrigatorio:
 {
@@ -280,7 +311,33 @@ ${questionBankContext}`,
   return normalizeQuestions(payload, 'extracted').slice(0, questionCount);
 }
 
-async function generateSupplementalQuestions({ apiKey, files, usedQuestions, questionCount, questionMode, signal }) {
+async function extractExistingQuestions({ apiKey, files, theoryContext, questionCount, signal }) {
+  const collected = [];
+
+  while (collected.length < questionCount) {
+    const batchSize = Math.min(MAX_QUESTIONS_PER_CALL, questionCount - collected.length);
+    const batch = await extractExistingQuestionsBatch({
+      apiKey,
+      files,
+      theoryContext,
+      questionCount: batchSize,
+      usedQuestions: collected,
+      signal,
+    });
+
+    if (batch.length === 0) break;
+    collected.push(...batch);
+    const deduped = dedupeQuestions(collected);
+    collected.length = 0;
+    collected.push(...deduped);
+
+    if (batch.length < batchSize) break;
+  }
+
+  return collected.slice(0, questionCount);
+}
+
+async function generateSupplementalQuestionsBatch({ apiKey, files, usedQuestions, questionCount, questionMode, signal }) {
   if (questionCount <= 0) return [];
 
   const generatedOnly = questionMode === 'generated_only';
@@ -343,6 +400,32 @@ ${theoryContext}`,
   return normalizeQuestions(payload, 'generated').slice(0, questionCount);
 }
 
+async function generateSupplementalQuestions({ apiKey, files, usedQuestions, questionCount, questionMode, signal }) {
+  const collected = [];
+
+  while (collected.length < questionCount) {
+    const batchSize = Math.min(MAX_QUESTIONS_PER_CALL, questionCount - collected.length);
+    const batch = await generateSupplementalQuestionsBatch({
+      apiKey,
+      files,
+      usedQuestions: [...usedQuestions, ...collected],
+      questionCount: batchSize,
+      questionMode,
+      signal,
+    });
+
+    if (batch.length === 0) break;
+    collected.push(...batch);
+    const deduped = dedupeQuestions(collected);
+    collected.length = 0;
+    collected.push(...deduped);
+
+    if (batch.length < batchSize) break;
+  }
+
+  return collected.slice(0, questionCount);
+}
+
 export async function buildQuizFromCorpus({ apiKey, files, questionMode = 'generated_only', questionCount = 12, signal }) {
   const classifiedFiles = classifyQuizFiles(files);
   const theoryContext = buildTheoryContext(classifiedFiles);
@@ -367,7 +450,12 @@ export async function buildQuizFromCorpus({ apiKey, files, questionMode = 'gener
     signal,
   });
 
-  const questions = [...extractedQuestions, ...generatedQuestions].slice(0, questionCount);
+  const questions = dedupeQuestions([...extractedQuestions, ...generatedQuestions])
+    .slice(0, questionCount)
+    .map((question, index) => ({
+      ...question,
+      id: `${question.origin}-${index + 1}`,
+    }));
   if (questions.length === 0) {
     throw new Error('Nao foi possivel extrair ou gerar questoes validas com esses PDFs.');
   }
