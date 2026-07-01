@@ -6,6 +6,7 @@ const MAX_FILES = 5;
 export default function QuizUpload({ deepseekAvailable, deepseekKey, onOpenApiKeyModal, onGenerate, onBack }) {
   const [files, setFiles] = useState([]);
   const [questionMode, setQuestionMode] = useState('generated_only');
+  const [questionCount, setQuestionCount] = useState(15);
   const [isProcessing, setIsProcessing] = useState(false);
   const [progress, setProgress] = useState('');
   const [error, setError] = useState('');
@@ -59,7 +60,7 @@ export default function QuizUpload({ deepseekAvailable, deepseekKey, onOpenApiKe
       onOpenApiKeyModal();
       return;
     }
-    onGenerate(files, { questionMode });
+    onGenerate(files, { questionMode, questionCount });
   };
 
   return (
@@ -142,6 +143,28 @@ export default function QuizUpload({ deepseekAvailable, deepseekKey, onOpenApiKe
                 <strong>Misturar com questoes dos PDFs</strong>
                 <span>Extrai questoes existentes dos arquivos e completa com questoes novas.</span>
               </button>
+            </div>
+          </section>
+        )}
+
+        {files.length > 0 && (
+          <section className="quiz-mode-panel">
+            <div>
+              <span className="quiz-kicker">Tamanho do simulado</span>
+              <h2>Quantas questoes?</h2>
+              <p>Escolha a quantidade desejada. Simulados maiores podem demorar mais para gerar.</p>
+            </div>
+            <div className="quiz-count-options">
+              {[15, 30, 45].map((count) => (
+                <button
+                  key={count}
+                  type="button"
+                  className={questionCount === count ? 'selected' : ''}
+                  onClick={() => setQuestionCount(count)}
+                >
+                  {count}
+                </button>
+              ))}
             </div>
           </section>
         )}

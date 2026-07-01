@@ -979,6 +979,12 @@ select.input option {
   gap: var(--space-sm);
 }
 
+.quiz-count-options {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-sm);
+}
+
 .quiz-mode-options button {
   display: grid;
   gap: var(--space-xs);
@@ -1004,6 +1010,25 @@ select.input option {
   color: var(--text-secondary);
   font-size: var(--font-size-sm);
   line-height: 1.45;
+}
+
+.quiz-count-options button {
+  min-height: 64px;
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.035);
+  border: 1px solid var(--border-glass);
+  border-radius: var(--radius-md);
+  font-family: var(--font-family);
+  font-size: var(--font-size-xl);
+  font-weight: 800;
+  cursor: pointer;
+  transition: border-color var(--transition-fast), background var(--transition-fast);
+}
+
+.quiz-count-options button:hover,
+.quiz-count-options button.selected {
+  border-color: var(--accent-mint);
+  background: rgba(143, 184, 168, 0.1);
 }
 
 .quiz-upload-actions,

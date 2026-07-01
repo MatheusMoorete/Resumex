@@ -484,7 +484,7 @@ export default function App() {
         apiKey: deepseekKey,
         files,
         questionMode: options.questionMode || 'generated_only',
-        questionCount: Math.min(12, Math.max(6, files.length * 4)),
+        questionCount: options.questionCount || 15,
         signal: abortControllerRef.current.signal,
       });
       setQuizAnalysis(analysis);
