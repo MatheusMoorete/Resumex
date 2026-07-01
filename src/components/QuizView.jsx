@@ -8,7 +8,6 @@ function getKindLabel(kind) {
 
 export default function QuizView({ files, questions, analysis, onNewQuiz }) {
   const [answers, setAnswers] = useState({});
-  const [submitted, setSubmitted] = useState(false);
 
   const answeredCount = Object.keys(answers).length;
   const score = useMemo(() => (
@@ -40,8 +39,8 @@ export default function QuizView({ files, questions, analysis, onNewQuiz }) {
           <strong>{answeredCount}/{questions.length}</strong>
         </div>
         <div>
-          <span>{submitted ? 'Pontuacao' : 'Status'}</span>
-          <strong>{submitted ? `${score}/${questions.length} (${percent}%)` : 'Em andamento'}</strong>
+          <span>Pontuacao</span>
+          <strong>{score}/{answeredCount || questions.length}{answeredCount === questions.length ? ` (${percent}%)` : ''}</strong>
         </div>
         <div>
           <span>Extraidas</span>
@@ -72,6 +71,7 @@ export default function QuizView({ files, questions, analysis, onNewQuiz }) {
       <div className="quiz-question-list">
         {questions.map((question, index) => {
           const selected = answers[question.id];
+          const answered = selected !== undefined;
           const isCorrect = selected === question.answerIndex;
 
           return (
@@ -80,7 +80,7 @@ export default function QuizView({ files, questions, analysis, onNewQuiz }) {
                 <span>
                   Questao {index + 1} · {question.origin === 'extracted' ? 'extraida do banco' : 'gerada pela IA'}
                 </span>
-                {submitted && (
+                {answered && (
                   <strong className={isCorrect ? 'quiz-correct' : 'quiz-wrong'}>
                     {isCorrect ? 'Correta' : 'Revisar'}
                   </strong>
@@ -94,8 +94,8 @@ export default function QuizView({ files, questions, analysis, onNewQuiz }) {
                   const className = [
                     'quiz-option',
                     selectedOption ? 'selected' : '',
-                    submitted && correctOption ? 'correct' : '',
-                    submitted && selectedOption && !correctOption ? 'wrong' : '',
+                    answered && correctOption ? 'correct' : '',
+                    answered && selectedOption && !correctOption ? 'wrong' : '',
                   ].filter(Boolean).join(' ');
 
                   return (
@@ -104,8 +104,9 @@ export default function QuizView({ files, questions, analysis, onNewQuiz }) {
                       className={className}
                       key={`${question.id}-${optionIndex}`}
                       onClick={() => {
-                        if (!submitted) setAnswers((prev) => ({ ...prev, [question.id]: optionIndex }));
+                        if (!answered) setAnswers((prev) => ({ ...prev, [question.id]: optionIndex }));
                       }}
+                      disabled={answered}
                     >
                       <span>{String.fromCharCode(65 + optionIndex)}</span>
                       {option}
@@ -113,7 +114,7 @@ export default function QuizView({ files, questions, analysis, onNewQuiz }) {
                   );
                 })}
               </div>
-              {submitted && (
+              {answered && (
                 <div className="quiz-explanation">
                   <strong>Explicacao</strong>
                   <p>{question.explanation}</p>
@@ -127,23 +128,12 @@ export default function QuizView({ files, questions, analysis, onNewQuiz }) {
       </div>
 
       <div className="quiz-submit-bar">
-        {!submitted ? (
-          <button
-            className="btn btn-primary btn-lg"
-            onClick={() => setSubmitted(true)}
-            disabled={answeredCount !== questions.length}
-          >
-            Corrigir teste
-          </button>
-        ) : (
-          <button className="btn btn-secondary" onClick={() => {
+        <button className="btn btn-secondary" onClick={() => {
             setAnswers({});
-            setSubmitted(false);
             window.scrollTo({ top: 0, behavior: 'smooth' });
           }}>
-            Refazer este teste
-          </button>
-        )}
+          Refazer este teste
+        </button>
       </div>
     </div>
   );
