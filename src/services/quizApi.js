@@ -302,7 +302,8 @@ Regras:
 - Uma unica alternativa correta.
 - Foque em condutas, diagnostico, criterios, classificacoes, limiares e diferencas importantes.
 - Evite repetir os temas das questoes ja extraidas.
-- Se houver bancos de questoes no material, use-os apenas como referencia de estilo/tema/dificuldade; nao copie enunciados.
+- Se houver bancos de questoes no material, use-os como referencia forte de FORMATO: tamanho do enunciado, nivel de dificuldade, estilo das alternativas, linguagem, tipo de distrator, distribuicao de temas e forma de explicacao.
+- No modo "apenas questoes novas", voce deve gerar questoes ineditas no mesmo formato dos bancos enviados, mas sem copiar enunciados, alternativas ou casos clinicos especificos.
 - Responda somente JSON valido.
 - Nao use Markdown, comentarios, trailing commas nem texto antes/depois do JSON.`,
     user: `Gere ${questionCount} questoes novas para completar o simulado.
@@ -327,6 +328,12 @@ Formato obrigatorio:
 ## TEMAS JA COBERTOS POR QUESTOES EXTRAIDAS
 
 - ${existingTopics || 'Nenhum'}
+
+## INSTRUCAO DE FORMATO
+
+${generatedOnly
+  ? 'Os PDFs classificados como banco de questoes devem ser usados como modelo de formato. Gere questoes novas que parecam pertencer ao mesmo banco, mantendo estilo, extensao, dificuldade e estrutura das alternativas, mas sem copiar conteudo literal.'
+  : 'Complete o simulado com questoes novas sem repetir temas ja extraidos.'}
 
 ## MATERIAL TEORICO
 
