@@ -1,7 +1,7 @@
 import { useCallback, useRef, useState } from 'react';
 import { extractTextFromPDF } from '../services/pdfExtractor';
 
-export default function UploadZone({ onUploadComplete }) {
+export default function UploadZone({ onUploadComplete, onStartQuiz }) {
   const [isDragOver, setIsDragOver] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [error, setError] = useState(null);
@@ -124,6 +124,13 @@ export default function UploadZone({ onUploadComplete }) {
           </div>
 
           {error && <div className="upload-error">{error}</div>}
+        </div>
+
+        <div className="landing-mode-row">
+          <button className="landing-mode-button" type="button" onClick={onStartQuiz}>
+            <span>Teste MVP</span>
+            <strong>Gerar questoes de ate 5 PDFs</strong>
+          </button>
         </div>
       </section>
 

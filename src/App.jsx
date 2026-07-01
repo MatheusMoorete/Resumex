@@ -7,7 +7,10 @@ import PreferencesPanel from './components/PreferencesPanel';
 import SpecEditor from './components/SpecEditor';
 import ProcessingView from './components/ProcessingView';
 import ResultView from './components/ResultView';
+import QuizUpload from './components/QuizUpload';
+import QuizView from './components/QuizView';
 import { generateSummary } from './services/deepseekApi';
+import { generateQuizQuestions } from './services/quizApi';
 import { transcribePDFWithGLM } from './services/zhipuApi';
 import { renderPDFPagesToImages } from './services/pdfExtractor';
 import { setAuthTokenGetter } from './services/authClient';
@@ -300,6 +303,8 @@ export default function App() {
   const [isAuditing, setIsAuditing] = useState(false);
   const [missingPages, setMissingPages] = useState([]);
   const [coverageReinforcementInstruction, setCoverageReinforcementInstruction] = useState('');
+  const [quizFiles, setQuizFiles] = useState([]);
+  const [quizQuestions, setQuizQuestions] = useState([]);
   const [error, setError] = useState('');
 
   // Abort controller
@@ -443,6 +448,42 @@ export default function App() {
     setError('');
     setAppState('preferences');
   }, [fileData]);
+
+  const handleStartQuiz = useCallback(() => {
+    if (abortControllerRef.current) abortControllerRef.current.abort();
+    setQuizFiles([]);
+    setQuizQuestions([]);
+    setError('');
+    setAppState('quiz-upload');
+  }, []);
+
+  const handleGenerateQuiz = useCallback(async (files) => {
+    if (!hasDeepseekAccess) {
+      setShowApiKeyModal(true);
+      return;
+    }
+
+    setQuizFiles(files);
+    setQuizQuestions([]);
+    setError('');
+    setAppState('quiz-processing');
+    abortControllerRef.current = new AbortController();
+
+    try {
+      const questions = await generateQuizQuestions({
+        apiKey: deepseekKey,
+        files,
+        questionCount: Math.min(12, Math.max(6, files.length * 4)),
+        signal: abortControllerRef.current.signal,
+      });
+      setQuizQuestions(questions);
+      setAppState('quiz-result');
+    } catch (err) {
+      if (err.name === 'AbortError') return;
+      setError(err.message || 'Erro ao gerar o teste.');
+      setAppState('error');
+    }
+  }, [deepseekKey, hasDeepseekAccess]);
 
   // --- Preferences selected → generate SPEC ---
   const handlePreferencesComplete = useCallback((prefs) => {
@@ -829,6 +870,8 @@ Você DEVE obrigatoriamente incluir e detalhar todas as informações, critério
     setIsAuditing(false);
     setMissingPages([]);
     setCoverageReinforcementInstruction('');
+    setQuizFiles([]);
+    setQuizQuestions([]);
     setError('');
     setAppState('upload');
   }, [fileData]);
@@ -849,6 +892,8 @@ Você DEVE obrigatoriamente incluir e detalhar todas as informações, critério
     setSummaryLog('');
     setMissingPages([]);
     setCoverageReinforcementInstruction('');
+    setQuizFiles([]);
+    setQuizQuestions([]);
     setAppState('upload');
   }, [fileData]);
 
@@ -952,7 +997,20 @@ Você DEVE obrigatoriamente incluir e detalhar todas as informações, critério
         />
 
         {appState === 'upload' && (
-          <UploadZone onUploadComplete={handleUploadComplete} />
+          <UploadZone
+            onUploadComplete={handleUploadComplete}
+            onStartQuiz={handleStartQuiz}
+          />
+        )}
+
+        {appState === 'quiz-upload' && (
+          <QuizUpload
+            deepseekKey={deepseekKey}
+            deepseekAvailable={hasDeepseekAccess}
+            onOpenApiKeyModal={() => setShowApiKeyModal(true)}
+            onGenerate={handleGenerateQuiz}
+            onBack={handleNewSummary}
+          />
         )}
 
         {appState === 'preferences' && fileData && (
@@ -1039,6 +1097,20 @@ Você DEVE obrigatoriamente incluir e detalhar todas as informações, critério
           <ProcessingView isAuditing={isAuditing} />
         )}
 
+        {appState === 'quiz-processing' && (
+          <div className="processing-section">
+            <div className="processing-animation">
+              <div className="processing-ring" style={{ borderTopColor: 'var(--accent-mint)' }} />
+              <div className="processing-ring" style={{ borderRightColor: 'var(--accent-cyan)', animationDirection: 'reverse' }} />
+              <div className="processing-core">Q</div>
+            </div>
+            <div className="processing-text">
+              <h3>Gerando teste</h3>
+              <p>A IA esta analisando os PDFs e criando questoes objetivas com gabarito.</p>
+            </div>
+          </div>
+        )}
+
         {appState === 'result' && (
           <ResultView
             pdfUrl={fileData?.pdfUrl}
@@ -1047,6 +1119,14 @@ Você DEVE obrigatoriamente incluir e detalhar todas as informações, critério
             missingPages={missingPages}
             onRegenerateWithCoverage={handleRegenerateWithCoverage}
             onNewSummary={handleNewSummary}
+          />
+        )}
+
+        {appState === 'quiz-result' && (
+          <QuizView
+            files={quizFiles}
+            questions={quizQuestions}
+            onNewQuiz={handleStartQuiz}
           />
         )}
 
