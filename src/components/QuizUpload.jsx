@@ -5,6 +5,7 @@ const MAX_FILES = 5;
 
 export default function QuizUpload({ deepseekAvailable, deepseekKey, onOpenApiKeyModal, onGenerate, onBack }) {
   const [files, setFiles] = useState([]);
+  const [questionMode, setQuestionMode] = useState('generated_only');
   const [isProcessing, setIsProcessing] = useState(false);
   const [progress, setProgress] = useState('');
   const [error, setError] = useState('');
@@ -58,7 +59,7 @@ export default function QuizUpload({ deepseekAvailable, deepseekKey, onOpenApiKe
       onOpenApiKeyModal();
       return;
     }
-    onGenerate(files);
+    onGenerate(files, { questionMode });
   };
 
   return (
@@ -115,6 +116,34 @@ export default function QuizUpload({ deepseekAvailable, deepseekKey, onOpenApiKe
               </div>
             ))}
           </div>
+        )}
+
+        {files.length > 0 && (
+          <section className="quiz-mode-panel">
+            <div>
+              <span className="quiz-kicker">Fonte das questoes</span>
+              <h2>Como montar o teste?</h2>
+              <p>Use bancos de questoes como inspiracao ou misture questoes reais extraidas dos arquivos.</p>
+            </div>
+            <div className="quiz-mode-options">
+              <button
+                type="button"
+                className={questionMode === 'generated_only' ? 'selected' : ''}
+                onClick={() => setQuestionMode('generated_only')}
+              >
+                <strong>Apenas questoes novas</strong>
+                <span>Arquivos com questoes servem como modelo de estilo, tema e dificuldade.</span>
+              </button>
+              <button
+                type="button"
+                className={questionMode === 'mixed' ? 'selected' : ''}
+                onClick={() => setQuestionMode('mixed')}
+              >
+                <strong>Misturar com questoes dos PDFs</strong>
+                <span>Extrai questoes existentes dos arquivos e completa com questoes novas.</span>
+              </button>
+            </div>
+          </section>
         )}
 
         <div className="quiz-upload-actions">

@@ -78,8 +78,12 @@ function buildFileContext(file, label) {
   return `# ${label}: ${file.name}\nTipo detectado: ${file.kind}\nPaginas: ${file.numPages}\n\n${truncateText(file.text, MAX_FILE_CHARS)}`;
 }
 
-function buildTheoryContext(files) {
-  const theoryFiles = files.filter((file) => file.kind === 'theory' || file.kind === 'mixed');
+function buildTheoryContext(files, { includeQuestionBanksAsStyle = false } = {}) {
+  const theoryFiles = files.filter((file) => (
+    file.kind === 'theory'
+    || file.kind === 'mixed'
+    || (includeQuestionBanksAsStyle && file.kind === 'question_bank')
+  ));
   const sourceFiles = theoryFiles.length ? theoryFiles : files;
   return compactContext(sourceFiles.map((file, index) => buildFileContext(file, `MATERIAL TEORICO ${index + 1}`)));
 }
@@ -205,10 +209,11 @@ ${questionBankContext}`,
   return normalizeQuestions(payload, 'extracted').slice(0, questionCount);
 }
 
-async function generateSupplementalQuestions({ apiKey, files, usedQuestions, questionCount, signal }) {
+async function generateSupplementalQuestions({ apiKey, files, usedQuestions, questionCount, questionMode, signal }) {
   if (questionCount <= 0) return [];
 
-  const theoryContext = buildTheoryContext(files);
+  const generatedOnly = questionMode === 'generated_only';
+  const theoryContext = buildTheoryContext(files, { includeQuestionBanksAsStyle: generatedOnly });
   const existingTopics = usedQuestions
     .map((question) => question.topic || question.stem.slice(0, 120))
     .filter(Boolean)
@@ -226,6 +231,7 @@ Regras:
 - Uma unica alternativa correta.
 - Foque em condutas, diagnostico, criterios, classificacoes, limiares e diferencas importantes.
 - Evite repetir os temas das questoes ja extraidas.
+- Se houver bancos de questoes no material, use-os apenas como referencia de estilo/tema/dificuldade; nao copie enunciados.
 - Responda somente JSON valido.`,
     user: `Gere ${questionCount} questoes novas para completar o simulado.
 
@@ -258,16 +264,19 @@ ${theoryContext}`,
   return normalizeQuestions(payload, 'generated').slice(0, questionCount);
 }
 
-export async function buildQuizFromCorpus({ apiKey, files, questionCount = 12, signal }) {
+export async function buildQuizFromCorpus({ apiKey, files, questionMode = 'generated_only', questionCount = 12, signal }) {
   const classifiedFiles = classifyQuizFiles(files);
   const theoryContext = buildTheoryContext(classifiedFiles);
-  const extractedQuestions = await extractExistingQuestions({
-    apiKey,
-    files: classifiedFiles,
-    theoryContext,
-    questionCount: Math.ceil(questionCount * 0.7),
-    signal,
-  });
+  const shouldExtractQuestions = questionMode === 'mixed';
+  const extractedQuestions = shouldExtractQuestions
+    ? await extractExistingQuestions({
+        apiKey,
+        files: classifiedFiles,
+        theoryContext,
+        questionCount: Math.ceil(questionCount * 0.7),
+        signal,
+      })
+    : [];
 
   const remainingCount = Math.max(0, questionCount - extractedQuestions.length);
   const generatedQuestions = await generateSupplementalQuestions({
@@ -275,6 +284,7 @@ export async function buildQuizFromCorpus({ apiKey, files, questionCount = 12, s
     files: classifiedFiles,
     usedQuestions: extractedQuestions,
     questionCount: remainingCount,
+    questionMode,
     signal,
   });
 
@@ -285,6 +295,7 @@ export async function buildQuizFromCorpus({ apiKey, files, questionCount = 12, s
 
   return {
     classifiedFiles,
+    questionMode,
     extractedQuestions,
     generatedQuestions,
     questions,

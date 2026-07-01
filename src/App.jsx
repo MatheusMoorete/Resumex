@@ -461,7 +461,7 @@ export default function App() {
     setAppState('quiz-upload');
   }, []);
 
-  const handleGenerateQuiz = useCallback(async (files) => {
+  const handleGenerateQuiz = useCallback(async (files, options = {}) => {
     if (!hasDeepseekAccess) {
       setShowApiKeyModal(true);
       return;
@@ -471,7 +471,11 @@ export default function App() {
     setQuizQuestions([]);
     setQuizAnalysis(null);
     setError('');
-    setQuizProcessingMessage('Classificando arquivos, extraindo questoes existentes e preparando material teorico...');
+    setQuizProcessingMessage(
+      options.questionMode === 'mixed'
+        ? 'Classificando arquivos, extraindo questoes existentes e preparando material teorico...'
+        : 'Classificando arquivos e usando bancos de questoes como referencia para gerar questoes novas...'
+    );
     setAppState('quiz-processing');
     abortControllerRef.current = new AbortController();
 
@@ -479,6 +483,7 @@ export default function App() {
       const analysis = await buildQuizFromCorpus({
         apiKey: deepseekKey,
         files,
+        questionMode: options.questionMode || 'generated_only',
         questionCount: Math.min(12, Math.max(6, files.length * 4)),
         signal: abortControllerRef.current.signal,
       });
