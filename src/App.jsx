@@ -429,9 +429,24 @@ export default function App() {
 
   // --- Upload complete → go to preferences ---
   const handleUploadComplete = useCallback((data) => {
+    if (abortControllerRef.current) abortControllerRef.current.abort();
+    if (fileData?.pdfUrl) URL.revokeObjectURL(fileData.pdfUrl);
     setFileData(data);
+    setPreferences(null);
+    setContextBase('');
+    setEvidenceMap('');
+    setSpec('');
+    setSpecAudit('');
+    setSpecCorrectionCount(0);
+    setRiskDecisions({});
+    setSummary('');
+    setSummaryLog('');
+    setIsAuditing(false);
+    setMissingPages([]);
+    setCoverageReinforcementInstruction('');
+    setError('');
     setAppState('preferences');
-  }, []);
+  }, [fileData]);
 
   // --- Preferences selected → generate SPEC ---
   const handlePreferencesComplete = useCallback((prefs) => {
