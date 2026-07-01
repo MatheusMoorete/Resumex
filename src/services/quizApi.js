@@ -5,6 +5,7 @@ const MAX_CONTEXT_CHARS = 70000;
 const MAX_FILE_CHARS = 24000;
 const MAX_QUESTIONS_PER_CALL = 10;
 const MAX_CHUNK_CHARS = 4500;
+const AUDIT_BATCH_SIZE = 12;
 
 const TOPIC_RULES = [
   { topic: 'AVC isquemico e trombolise', keywords: ['avc isqu', 'trombol', 'nihss', 'ictus', 'wake-up', 'dwi', 'flair', 'alteplase', 'tenecteplase'] },
@@ -337,6 +338,20 @@ function normalizeQuestions(payload, origin) {
     ));
 }
 
+function normalizeAuditItems(payload) {
+  const items = Array.isArray(payload?.items) ? payload.items : [];
+
+  return items
+    .map((item) => ({
+      id: String(item.id || '').trim(),
+      approved: Boolean(item.approved),
+      score: Number(item.score) || 0,
+      issue: String(item.issue || '').trim(),
+      topic: String(item.topic || '').trim(),
+    }))
+    .filter((item) => item.id);
+}
+
 function buildSkipList(questions) {
   return questions
     .map((question, index) => `${index + 1}. ${question.stem.slice(0, 180)}`)
@@ -601,22 +616,130 @@ async function generateSupplementalQuestions({ apiKey, files, contentChunks, use
   return collected.slice(0, questionCount);
 }
 
+function buildAuditQuestionPayload(questions) {
+  return questions.map((question) => ({
+    id: question.id,
+    stem: question.stem,
+    options: question.options,
+    answerIndex: question.answerIndex,
+    explanation: question.explanation,
+    topic: question.topic,
+    source: question.source,
+    origin: question.origin,
+  }));
+}
+
+async function auditQuestionBatch({ apiKey, questions, signal }) {
+  const payload = await callDeepSeekJson({
+    apiKey,
+    signal,
+    temperature: 0.05,
+    maxTokens: 4096,
+    system: `Voce e um auditor de qualidade de questoes objetivas medicas.
+
+Avalie cada questao por qualidade docimologica.
+
+Aprove somente se:
+- O enunciado e claro e tem informacao suficiente.
+- Existe exatamente uma alternativa correta.
+- As alternativas erradas sao plausiveis, mas inequivocamente erradas.
+- Nao ha duas respostas defensaveis.
+- Nao ha erro clinico evidente.
+- A explicacao justifica a resposta.
+- A questao nao depende de conhecimento ausente do enunciado/material indicado.
+
+Reprove questoes ambiguas, com alternativa correta ausente, com duas corretas, muito vagas ou muito decorativas.
+Responda somente JSON valido.`,
+    user: `Audite estas questoes e retorne JSON:
+
+{
+  "items": [
+    {
+      "id": "id-da-questao",
+      "approved": true,
+      "score": 0-100,
+      "issue": "motivo curto se reprovada ou ressalva",
+      "topic": "tema refinado"
+    }
+  ]
+}
+
+## QUESTOES
+
+${JSON.stringify(buildAuditQuestionPayload(questions))}`,
+  });
+
+  return normalizeAuditItems(payload);
+}
+
+async function auditAndRankQuestions({ apiKey, questions, questionCount, signal }) {
+  const deduped = dedupeQuestions(questions).map((question, index) => ({
+    ...question,
+    id: `${question.origin}-candidate-${index + 1}`,
+  }));
+  const auditItems = [];
+
+  for (let index = 0; index < deduped.length; index += AUDIT_BATCH_SIZE) {
+    const batch = deduped.slice(index, index + AUDIT_BATCH_SIZE);
+    const result = await auditQuestionBatch({ apiKey, questions: batch, signal });
+    auditItems.push(...result);
+  }
+
+  const auditById = new Map(auditItems.map((item) => [item.id, item]));
+  const ranked = deduped
+    .map((question) => {
+      const audit = auditById.get(question.id);
+      return {
+        ...question,
+        audit,
+        topic: audit?.topic || question.topic,
+        qualityScore: audit?.score ?? 0,
+      };
+    })
+    .sort((a, b) => {
+      const approvedDiff = Number(Boolean(b.audit?.approved)) - Number(Boolean(a.audit?.approved));
+      if (approvedDiff) return approvedDiff;
+      return (b.qualityScore || 0) - (a.qualityScore || 0);
+    });
+
+  const approved = ranked.filter((question) => question.audit?.approved && question.qualityScore >= 70);
+  const fallback = ranked.filter((question) => !approved.includes(question));
+  const selected = [...approved, ...fallback]
+    .slice(0, questionCount)
+    .map((question, index) => ({
+      ...question,
+      id: `${question.origin}-${index + 1}`,
+    }));
+
+  return {
+    questions: selected,
+    auditSummary: {
+      candidates: deduped.length,
+      audited: auditItems.length,
+      approved: approved.length,
+      delivered: selected.length,
+    },
+  };
+}
+
 export async function buildQuizFromCorpus({ apiKey, files, questionMode = 'generated_only', questionCount = 12, signal }) {
   const classifiedFiles = classifyQuizFiles(files);
   const contentChunks = buildContentIndex(classifiedFiles);
   const theoryContext = buildTheoryContext(classifiedFiles);
   const shouldExtractQuestions = questionMode === 'mixed';
+  const targetCandidateCount = Math.ceil(questionCount * 1.45);
+  const extractedTarget = shouldExtractQuestions ? Math.ceil(targetCandidateCount * 0.7) : 0;
   const extractedQuestions = shouldExtractQuestions
     ? await extractExistingQuestions({
         apiKey,
         files: classifiedFiles,
         theoryContext,
-        questionCount: Math.ceil(questionCount * 0.7),
+        questionCount: extractedTarget,
         signal,
       })
     : [];
 
-  const remainingCount = Math.max(0, questionCount - extractedQuestions.length);
+  const remainingCount = Math.max(0, targetCandidateCount - extractedQuestions.length);
   const generatedQuestions = await generateSupplementalQuestions({
     apiKey,
     files: classifiedFiles,
@@ -627,12 +750,13 @@ export async function buildQuizFromCorpus({ apiKey, files, questionMode = 'gener
     signal,
   });
 
-  const questions = dedupeQuestions([...extractedQuestions, ...generatedQuestions])
-    .slice(0, questionCount)
-    .map((question, index) => ({
-      ...question,
-      id: `${question.origin}-${index + 1}`,
-    }));
+  const rankedResult = await auditAndRankQuestions({
+    apiKey,
+    questions: [...extractedQuestions, ...generatedQuestions],
+    questionCount,
+    signal,
+  });
+  const questions = rankedResult.questions;
   if (questions.length === 0) {
     throw new Error('Nao foi possivel extrair ou gerar questoes validas com esses PDFs.');
   }
@@ -644,6 +768,7 @@ export async function buildQuizFromCorpus({ apiKey, files, questionMode = 'gener
       topics: [...new Set(contentChunks.map((chunk) => chunk.topic).filter(Boolean))],
     },
     questionMode,
+    auditSummary: rankedResult.auditSummary,
     extractedQuestions,
     generatedQuestions,
     questions,
