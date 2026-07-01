@@ -1,6 +1,12 @@
 import { useMemo, useState } from 'react';
 
-export default function QuizView({ files, questions, onNewQuiz }) {
+function getKindLabel(kind) {
+  if (kind === 'question_bank') return 'Banco de questoes';
+  if (kind === 'mixed') return 'Misto';
+  return 'Teoria';
+}
+
+export default function QuizView({ files, questions, analysis, onNewQuiz }) {
   const [answers, setAnswers] = useState({});
   const [submitted, setSubmitted] = useState(false);
 
@@ -12,6 +18,9 @@ export default function QuizView({ files, questions, onNewQuiz }) {
   ), [answers, questions]);
 
   const percent = questions.length ? Math.round((score / questions.length) * 100) : 0;
+  const extractedCount = questions.filter((question) => question.origin === 'extracted').length;
+  const generatedCount = questions.filter((question) => question.origin === 'generated').length;
+  const classifiedFiles = analysis?.classifiedFiles || files;
 
   return (
     <div className="quiz-view-section">
@@ -33,6 +42,23 @@ export default function QuizView({ files, questions, onNewQuiz }) {
           <span>{submitted ? 'Pontuacao' : 'Status'}</span>
           <strong>{submitted ? `${score}/${questions.length} (${percent}%)` : 'Em andamento'}</strong>
         </div>
+        <div>
+          <span>Extraidas</span>
+          <strong>{extractedCount}</strong>
+        </div>
+        <div>
+          <span>Geradas</span>
+          <strong>{generatedCount}</strong>
+        </div>
+      </div>
+
+      <div className="quiz-corpus-panel">
+        {classifiedFiles.map((file) => (
+          <div className="quiz-corpus-file" key={`${file.name}-${file.size}`}>
+            <strong>{file.name}</strong>
+            <span>{getKindLabel(file.kind)} · {file.numPages} paginas</span>
+          </div>
+        ))}
       </div>
 
       <div className="quiz-question-list">
@@ -43,7 +69,9 @@ export default function QuizView({ files, questions, onNewQuiz }) {
           return (
             <article className="quiz-question-card" key={question.id}>
               <div className="quiz-question-top">
-                <span>Questao {index + 1}</span>
+                <span>
+                  Questao {index + 1} · {question.origin === 'extracted' ? 'extraida do banco' : 'gerada pela IA'}
+                </span>
                 {submitted && (
                   <strong className={isCorrect ? 'quiz-correct' : 'quiz-wrong'}>
                     {isCorrect ? 'Correta' : 'Revisar'}
@@ -81,6 +109,7 @@ export default function QuizView({ files, questions, onNewQuiz }) {
                 <div className="quiz-explanation">
                   <strong>Explicacao</strong>
                   <p>{question.explanation}</p>
+                  {question.topic && <span>Tema: {question.topic}</span>}
                   {question.source && <span>{question.source}</span>}
                 </div>
               )}

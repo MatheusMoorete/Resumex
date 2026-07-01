@@ -10,7 +10,7 @@ import ResultView from './components/ResultView';
 import QuizUpload from './components/QuizUpload';
 import QuizView from './components/QuizView';
 import { generateSummary } from './services/deepseekApi';
-import { generateQuizQuestions } from './services/quizApi';
+import { buildQuizFromCorpus } from './services/quizApi';
 import { transcribePDFWithGLM } from './services/zhipuApi';
 import { renderPDFPagesToImages } from './services/pdfExtractor';
 import { setAuthTokenGetter } from './services/authClient';
@@ -305,6 +305,8 @@ export default function App() {
   const [coverageReinforcementInstruction, setCoverageReinforcementInstruction] = useState('');
   const [quizFiles, setQuizFiles] = useState([]);
   const [quizQuestions, setQuizQuestions] = useState([]);
+  const [quizAnalysis, setQuizAnalysis] = useState(null);
+  const [quizProcessingMessage, setQuizProcessingMessage] = useState('');
   const [error, setError] = useState('');
 
   // Abort controller
@@ -453,6 +455,8 @@ export default function App() {
     if (abortControllerRef.current) abortControllerRef.current.abort();
     setQuizFiles([]);
     setQuizQuestions([]);
+    setQuizAnalysis(null);
+    setQuizProcessingMessage('');
     setError('');
     setAppState('quiz-upload');
   }, []);
@@ -465,18 +469,21 @@ export default function App() {
 
     setQuizFiles(files);
     setQuizQuestions([]);
+    setQuizAnalysis(null);
     setError('');
+    setQuizProcessingMessage('Classificando arquivos, extraindo questoes existentes e preparando material teorico...');
     setAppState('quiz-processing');
     abortControllerRef.current = new AbortController();
 
     try {
-      const questions = await generateQuizQuestions({
+      const analysis = await buildQuizFromCorpus({
         apiKey: deepseekKey,
         files,
         questionCount: Math.min(12, Math.max(6, files.length * 4)),
         signal: abortControllerRef.current.signal,
       });
-      setQuizQuestions(questions);
+      setQuizAnalysis(analysis);
+      setQuizQuestions(analysis.questions);
       setAppState('quiz-result');
     } catch (err) {
       if (err.name === 'AbortError') return;
@@ -872,6 +879,8 @@ Você DEVE obrigatoriamente incluir e detalhar todas as informações, critério
     setCoverageReinforcementInstruction('');
     setQuizFiles([]);
     setQuizQuestions([]);
+    setQuizAnalysis(null);
+    setQuizProcessingMessage('');
     setError('');
     setAppState('upload');
   }, [fileData]);
@@ -894,6 +903,8 @@ Você DEVE obrigatoriamente incluir e detalhar todas as informações, critério
     setCoverageReinforcementInstruction('');
     setQuizFiles([]);
     setQuizQuestions([]);
+    setQuizAnalysis(null);
+    setQuizProcessingMessage('');
     setAppState('upload');
   }, [fileData]);
 
@@ -1105,8 +1116,8 @@ Você DEVE obrigatoriamente incluir e detalhar todas as informações, critério
               <div className="processing-core">Q</div>
             </div>
             <div className="processing-text">
-              <h3>Gerando teste</h3>
-              <p>A IA esta analisando os PDFs e criando questoes objetivas com gabarito.</p>
+              <h3>Montando simulado</h3>
+              <p>{quizProcessingMessage || 'A IA esta extraindo questoes e usando a teoria para completar o teste.'}</p>
             </div>
           </div>
         )}
@@ -1126,6 +1137,7 @@ Você DEVE obrigatoriamente incluir e detalhar todas as informações, critério
           <QuizView
             files={quizFiles}
             questions={quizQuestions}
+            analysis={quizAnalysis}
             onNewQuiz={handleStartQuiz}
           />
         )}
