@@ -156,6 +156,8 @@ Voce recebera DOIS inputs:
 2. Nao faca um resumo curto; transforme o contexto em um material completo para estudo medico.
 3. Nenhuma pagina do contexto/manifesto pode ser ignorada. Incorpore os blocos relevantes de cada pagina no corpo do resumo.
 4. Conteudo de tabelas, fluxogramas, imagens e anotacoes manuscritas confirmadas deve ser incorporado quando for relevante para estudo.
+4a. Anotacoes manuscritas legiveis/confirmadas devem entrar junto do topico correspondente do PDF, na mesma secao clinica e com citacao da pagina.
+4b. Nao crie uma secao final de "anotacoes a mao" para manuscritos legiveis. Secao final e permitida apenas para manuscritos incertos/ilegíveis, sem transformar esses trechos em fato medico consolidado.
 5. Nao omita condutas, criterios numericos, valores laboratoriais, dosagens, classificacoes, excecoes ou pontos de prova presentes no PDF.
 6. Manuscritos incertos nao devem virar fato medico consolidado. Se uma decisao humana foi enviada, use a decisao humana; caso contrario, omita o trecho incerto do resumo principal.
 7. Copie literalmente comparadores e formulas do contexto ou da decisao humana: >, <, >=, <=, =, +, -, setas, unidades, doses, pressoes, tempos e limiares.

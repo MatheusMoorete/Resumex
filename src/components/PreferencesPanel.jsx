@@ -59,10 +59,6 @@ function parsePageRanges(value, totalPages) {
   return { pages: [...pages].sort((a, b) => a - b), invalid };
 }
 
-function uniqueSortedPages(pages) {
-  return [...new Set(pages)].sort((a, b) => a - b);
-}
-
 export default function PreferencesPanel({
   fileData,
   deepseekKey,
@@ -97,7 +93,7 @@ export default function PreferencesPanel({
       return Array.from({ length: fileData.numPages }, (_, index) => index + 1);
     }
     if (handwritingMode === 'manual') {
-      return uniqueSortedPages([...detectedVisionPages, ...parsedManualPages.pages]);
+      return parsedManualPages.pages;
     }
     return detectedVisionPages;
   }, [readHandwriting, handwritingMode, fileData.numPages, detectedVisionPages, parsedManualPages.pages]);
@@ -207,7 +203,7 @@ export default function PreferencesPanel({
 
               <div className="prefs-estimate">
                 <span>{pagesSentToGlm.length} páginas serão lidas por visão</span>
-                <span>Detectadas: {detectedVisionPages.length ? detectedVisionPages.join(', ') : 'nenhuma'}</span>
+                <span>Auto: {detectedVisionPages.length ? detectedVisionPages.join(', ') : 'nenhuma'}</span>
               </div>
 
               {hasInvalidManualPages && (

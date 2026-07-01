@@ -9,6 +9,7 @@ import { buildAuthHeaders } from './authClient';
 
 const API_URL = '/api/zhipu/chat/completions';
 const MODEL_NAME = 'glm-4.5v';
+const TRANSCRIPTION_CONCURRENCY = 2;
 
 /**
  * Transcribes specific PDF pages using Zhipu's GLM-4.5V model.
@@ -30,41 +31,48 @@ export async function transcribePDFWithGLM({ apiKey, pageImages, pageNumbersToTr
   if (total === 0) return {};
 
   const transcriptionMap = {};
+  let nextIndex = 0;
 
-  for (const pageNum of pageNumbersToTranscribe) {
-    const pageImage = pageImages[pageNum];
-    if (!pageImage) {
-      transcriptionMap[pageNum] = `[⚠️ Nenhuma imagem gerada para a Página ${pageNum}]`;
-      completed++;
-      if (onProgress) {
-        onProgress({ current: completed, total });
+  async function transcribeNextPage() {
+    while (nextIndex < pageNumbersToTranscribe.length) {
+      if (signal?.aborted) {
+        throw new DOMException('Aborted', 'AbortError');
       }
-      continue;
-    }
 
-    try {
-      transcriptionMap[pageNum] = await transcribeSinglePage({
-        apiKey,
-        pageImage,
-        pageNum,
-        totalPages: pdfTotalPages,
-        signal,
-      });
-    } catch (err) {
-      if (err.name === 'AbortError') throw err;
+      const pageNum = pageNumbersToTranscribe[nextIndex];
+      nextIndex += 1;
+      const pageImage = pageImages[pageNum];
 
-      transcriptionMap[pageNum] = `[⚠️ Falha ao transcrever a Página ${pageNum}: ${err.message}]`;
-    } finally {
-      completed++;
-      if (onProgress) {
-        onProgress({ current: completed, total });
+      if (!pageImage) {
+        transcriptionMap[pageNum] = `[Aviso: Nenhuma imagem gerada para a Pagina ${pageNum}]`;
+        completed += 1;
+        if (onProgress) onProgress({ current: completed, total });
+        continue;
+      }
+
+      try {
+        transcriptionMap[pageNum] = await transcribeSinglePage({
+          apiKey,
+          pageImage,
+          pageNum,
+          totalPages: pdfTotalPages,
+          signal,
+        });
+      } catch (err) {
+        if (err.name === 'AbortError') throw err;
+        transcriptionMap[pageNum] = `[Aviso: Falha ao transcrever a Pagina ${pageNum}: ${err.message}]`;
+      } finally {
+        completed += 1;
+        if (onProgress) onProgress({ current: completed, total });
       }
     }
   }
 
+  const workerCount = Math.min(TRANSCRIPTION_CONCURRENCY, total);
+  await Promise.all(Array.from({ length: workerCount }, () => transcribeNextPage()));
+
   return transcriptionMap;
 }
-
 async function transcribeSinglePage({ apiKey, pageImage, pageNum, totalPages, signal }) {
   const prompt = buildVisionTranscriptionPrompt(pageNum, totalPages);
   const headers = {

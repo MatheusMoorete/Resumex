@@ -91,10 +91,6 @@ function getMissingPages(summaryText, totalPages) {
   return missing;
 }
 
-function uniqueSortedPages(pages) {
-  return [...new Set(pages)].sort((a, b) => a - b);
-}
-
 function getSpecAuditStatus(auditText) {
   if (!auditText) return 'PENDENTE';
   const match = auditText.match(/\*\*Status:\*\*\s*([^\n]+)/i);
@@ -488,7 +484,7 @@ export default function App() {
       : handwritingMode === 'all'
         ? allPageNumbers
         : handwritingMode === 'manual'
-          ? uniqueSortedPages([...detectedVisionPages, ...manualVisionPages])
+          ? manualVisionPages
           : detectedVisionPages;
     const hasVisionPages = visionPages.length > 0;
 
