@@ -15,7 +15,76 @@ function extractJsonObject(text) {
     throw new Error('A IA nao retornou um JSON valido para o teste.');
   }
 
-  return JSON.parse(jsonText.slice(start, end + 1));
+  const candidate = jsonText.slice(start, end + 1);
+  try {
+    return JSON.parse(candidate);
+  } catch (error) {
+    return repairAndParseQuizJson(candidate, error);
+  }
+}
+
+function repairAndParseQuizJson(candidate, originalError) {
+  const normalized = candidate
+    .replace(/,\s*([}\]])/g, '$1')
+    .replace(/[“”]/g, '"')
+    .replace(/[‘’]/g, "'");
+
+  try {
+    return JSON.parse(normalized);
+  } catch {}
+
+  const questionsKey = normalized.match(/"questions"\s*:\s*\[/);
+  if (!questionsKey) throw originalError;
+
+  const start = questionsKey.index + questionsKey[0].length - 1;
+  const items = [];
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  let objectStart = -1;
+
+  for (let index = start + 1; index < normalized.length; index++) {
+    const char = normalized[index];
+
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (char === '\\') {
+        escaped = true;
+      } else if (char === '"') {
+        inString = false;
+      }
+      continue;
+    }
+
+    if (char === '"') {
+      inString = true;
+      continue;
+    }
+
+    if (char === '{') {
+      if (depth === 0) objectStart = index;
+      depth += 1;
+      continue;
+    }
+
+    if (char === '}') {
+      depth -= 1;
+      if (depth === 0 && objectStart !== -1) {
+        const objectText = normalized.slice(objectStart, index + 1).replace(/,\s*([}\]])/g, '$1');
+        try {
+          items.push(JSON.parse(objectText));
+        } catch {}
+        objectStart = -1;
+      }
+      continue;
+    }
+
+    if (depth === 0 && char === ']') break;
+  }
+
+  if (items.length === 0) throw originalError;
+  return { questions: items };
 }
 
 function truncateText(text, maxChars) {
@@ -114,6 +183,7 @@ async function callDeepSeekJson({ apiKey, system, user, signal, maxTokens = 8192
       ],
       stream: false,
       max_tokens: maxTokens,
+      response_format: { type: 'json_object' },
       temperature,
     }),
     signal,
@@ -177,7 +247,8 @@ Objetivo:
 - Se nao houver gabarito claro, resolva usando o material teorico fornecido.
 - Nao invente questoes nesta etapa; apenas extraia questoes existentes.
 - Corrija apenas formatacao quebrada de PDF.
-- Responda somente JSON valido.`,
+- Responda somente JSON valido.
+- Nao use Markdown, comentarios, trailing commas nem texto antes/depois do JSON.`,
     user: `Extraia ate ${questionCount} questoes existentes dos bancos abaixo.
 
 Formato obrigatorio:
@@ -232,7 +303,8 @@ Regras:
 - Foque em condutas, diagnostico, criterios, classificacoes, limiares e diferencas importantes.
 - Evite repetir os temas das questoes ja extraidas.
 - Se houver bancos de questoes no material, use-os apenas como referencia de estilo/tema/dificuldade; nao copie enunciados.
-- Responda somente JSON valido.`,
+- Responda somente JSON valido.
+- Nao use Markdown, comentarios, trailing commas nem texto antes/depois do JSON.`,
     user: `Gere ${questionCount} questoes novas para completar o simulado.
 
 Formato obrigatorio:
