@@ -21,6 +21,7 @@ export default function QuizView({ files, questions, analysis, onNewQuiz }) {
   const extractedCount = questions.filter((question) => question.origin === 'extracted').length;
   const generatedCount = questions.filter((question) => question.origin === 'generated').length;
   const classifiedFiles = analysis?.classifiedFiles || files;
+  const contentIndex = analysis?.contentIndex;
 
   return (
     <div className="quiz-view-section">
@@ -60,6 +61,13 @@ export default function QuizView({ files, questions, analysis, onNewQuiz }) {
           </div>
         ))}
       </div>
+
+      {contentIndex && (
+        <div className="quiz-index-panel">
+          <strong>{contentIndex.chunkCount} blocos analisados</strong>
+          <span>{contentIndex.topics.slice(0, 8).join(' · ')}</span>
+        </div>
+      )}
 
       <div className="quiz-question-list">
         {questions.map((question, index) => {

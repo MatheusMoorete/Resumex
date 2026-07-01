@@ -1094,6 +1094,26 @@ select.input option {
   font-size: var(--font-size-xs);
 }
 
+.quiz-index-panel {
+  display: grid;
+  gap: var(--space-xs);
+  margin: calc(var(--space-md) * -1) 0 var(--space-lg);
+  padding: var(--space-md);
+  color: var(--text-secondary);
+  background: rgba(143, 184, 168, 0.07);
+  border: 1px solid rgba(143, 184, 168, 0.18);
+  border-radius: var(--radius-md);
+}
+
+.quiz-index-panel strong {
+  color: var(--text-primary);
+}
+
+.quiz-index-panel span {
+  font-size: var(--font-size-sm);
+  line-height: 1.5;
+}
+
 .quiz-question-list {
   display: grid;
   gap: var(--space-md);

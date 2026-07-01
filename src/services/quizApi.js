@@ -4,6 +4,18 @@ const API_URL = '/api/deepseek/chat/completions';
 const MAX_CONTEXT_CHARS = 70000;
 const MAX_FILE_CHARS = 24000;
 const MAX_QUESTIONS_PER_CALL = 10;
+const MAX_CHUNK_CHARS = 4500;
+
+const TOPIC_RULES = [
+  { topic: 'AVC isquemico e trombolise', keywords: ['avc isqu', 'trombol', 'nihss', 'ictus', 'wake-up', 'dwi', 'flair', 'alteplase', 'tenecteplase'] },
+  { topic: 'AVC hemorragico, HIP e HSA', keywords: ['hemorragia', 'hip', 'hsa', 'subaracn', 'intraparenquimatosa', 'nimodipina', 'hunt-hess', 'vasoespasmo'] },
+  { topic: 'TCE e neurotrauma', keywords: ['tce', 'traumatismo', 'glasgow', 'epidural', 'subdural', 'axonal', 'craniectomia', 'morte encefalica'] },
+  { topic: 'Tumores neurologicos', keywords: ['tumor', 'glioma', 'meningioma', 'metastase', 'neoplasia', 'astrocitoma', 'glioblastoma'] },
+  { topic: 'Dor e neurocirurgia funcional', keywords: ['dor', 'trigem', 'neuralgia', 'rizotomia', 'estimula', 'funcional', 'neuromodula'] },
+  { topic: 'Coluna e medula', keywords: ['coluna', 'medula', 'radicul', 'mielopatia', 'hernia', 'estenose', 'compressao medular'] },
+  { topic: 'Hidrocefalia e hipertensao intracraniana', keywords: ['hidrocefalia', 'pic', 'dve', 'dvp', 'hipertensao intracraniana', 'liquor'] },
+  { topic: 'Fossa posterior, AIT e vertigem', keywords: ['fossa posterior', 'ait', 'hints', 'vertigem', 'ataxia', 'nistagmo'] },
+];
 
 function extractJsonObject(text) {
   const source = String(text || '').trim();
@@ -113,6 +125,93 @@ function countMatches(text, pattern) {
   return (String(text || '').match(pattern) || []).length;
 }
 
+function normalizeText(value) {
+  return String(value || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^\w\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function inferTopic(text, fileName = '') {
+  const normalized = normalizeText(`${fileName}\n${text}`);
+  let best = { topic: 'Geral', score: 0 };
+
+  for (const rule of TOPIC_RULES) {
+    const score = rule.keywords.reduce((total, keyword) => (
+      normalized.includes(normalizeText(keyword)) ? total + 1 : total
+    ), 0);
+    if (score > best.score) best = { topic: rule.topic, score };
+  }
+
+  if (best.score > 0) return best.topic;
+
+  const heading = String(text || '')
+    .split('\n')
+    .map((line) => line.trim())
+    .find((line) => line.length >= 4 && line.length <= 80 && !/^[-*]/.test(line));
+
+  return heading || 'Geral';
+}
+
+function splitTextByPages(text) {
+  const source = String(text || '');
+  const pageRegex = /---\s*P(?:a|á|Ã¡)gina\s+(\d+)\s*---/gi;
+  const pages = [];
+  const matches = [...source.matchAll(pageRegex)];
+
+  if (matches.length === 0) {
+    return [{ page: null, text: source }];
+  }
+
+  matches.forEach((match, index) => {
+    const start = match.index + match[0].length;
+    const end = matches[index + 1]?.index ?? source.length;
+    pages.push({
+      page: Number(match[1]),
+      text: source.slice(start, end).trim(),
+    });
+  });
+
+  return pages;
+}
+
+function splitLongChunk(text, maxChars = MAX_CHUNK_CHARS) {
+  const source = String(text || '').trim();
+  if (source.length <= maxChars) return [source];
+
+  const chunks = [];
+  for (let index = 0; index < source.length; index += maxChars) {
+    chunks.push(source.slice(index, index + maxChars));
+  }
+  return chunks;
+}
+
+function buildContentIndex(files) {
+  const chunks = [];
+
+  files.forEach((file) => {
+    const pages = splitTextByPages(file.text);
+    pages.forEach((page) => {
+      splitLongChunk(page.text).forEach((chunkText, chunkIndex) => {
+        if (chunkText.trim().length < 80) return;
+        chunks.push({
+          id: `${file.name}-p${page.page || 'x'}-${chunkIndex}`,
+          fileName: file.name,
+          page: page.page,
+          kind: file.kind,
+          topic: inferTopic(chunkText, file.name),
+          text: chunkText,
+        });
+      });
+    });
+  });
+
+  return chunks;
+}
+
 export function classifyQuizFiles(files) {
   return files.map((file) => {
     const text = String(file.text || '').slice(0, 40000);
@@ -156,6 +255,12 @@ function buildTheoryContext(files, { includeQuestionBanksAsStyle = false } = {})
   ));
   const sourceFiles = theoryFiles.length ? theoryFiles : files;
   return compactContext(sourceFiles.map((file, index) => buildFileContext(file, `MATERIAL TEORICO ${index + 1}`)));
+}
+
+function buildChunkContext(chunks, label = 'BLOCO') {
+  return compactContext(chunks.map((chunk, index) => (
+    `# ${label} ${index + 1}: ${chunk.topic}\nArquivo: ${chunk.fileName}${chunk.page ? ` | Pagina: ${chunk.page}` : ''}\nTipo: ${chunk.kind}\n\n${truncateText(chunk.text, MAX_CHUNK_CHARS)}`
+  )));
 }
 
 function buildQuestionBankContext(files) {
@@ -238,19 +343,42 @@ function buildSkipList(questions) {
     .join('\n');
 }
 
+function stemTokens(stem) {
+  const stopwords = new Set([
+    'sobre', 'qual', 'quais', 'assinale', 'alternativa', 'correta', 'incorreta',
+    'paciente', 'apresenta', 'em', 'de', 'da', 'do', 'das', 'dos', 'para', 'com',
+    'uma', 'um', 'que', 'e', 'o', 'a', 'os', 'as', 'no', 'na', 'nos', 'nas',
+  ]);
+
+  return normalizeText(stem)
+    .split(' ')
+    .filter((token) => token.length > 3 && !stopwords.has(token));
+}
+
+function areSimilarQuestions(a, b) {
+  const aTokens = new Set(stemTokens(a.stem));
+  const bTokens = new Set(stemTokens(b.stem));
+  if (aTokens.size === 0 || bTokens.size === 0) return false;
+
+  let intersection = 0;
+  aTokens.forEach((token) => {
+    if (bTokens.has(token)) intersection += 1;
+  });
+
+  const smaller = Math.min(aTokens.size, bTokens.size);
+  return intersection / smaller >= 0.68;
+}
+
 function dedupeQuestions(questions) {
   const seen = new Set();
   const unique = [];
 
   for (const question of questions) {
-    const key = question.stem
-      .toLowerCase()
-      .replace(/\s+/g, ' ')
-      .replace(/[^\wÀ-ÿ ]/g, '')
-      .trim()
-      .slice(0, 180);
+    const key = normalizeText(question.stem).slice(0, 180);
 
     if (!key || seen.has(key)) continue;
+    if (unique.some((existing) => areSimilarQuestions(existing, question))) continue;
+
     seen.add(key);
     unique.push(question);
   }
@@ -337,11 +465,47 @@ async function extractExistingQuestions({ apiKey, files, theoryContext, question
   return collected.slice(0, questionCount);
 }
 
-async function generateSupplementalQuestionsBatch({ apiKey, files, usedQuestions, questionCount, questionMode, signal }) {
+function getGenerationTopics(contentChunks) {
+  const theoryChunks = contentChunks.filter((chunk) => chunk.kind === 'theory' || chunk.kind === 'mixed');
+  const sourceChunks = theoryChunks.length ? theoryChunks : contentChunks;
+  const topics = [...new Set(sourceChunks.map((chunk) => chunk.topic).filter(Boolean))];
+  return topics.length ? topics : ['Geral'];
+}
+
+function selectFocusChunks(contentChunks, focusTopic, questionMode) {
+  const mainChunks = contentChunks
+    .filter((chunk) => (
+      chunk.topic === focusTopic
+      && (chunk.kind === 'theory' || chunk.kind === 'mixed' || questionMode === 'generated_only')
+    ))
+    .slice(0, 6);
+  const fallbackChunks = contentChunks
+    .filter((chunk) => chunk.kind === 'theory' || chunk.kind === 'mixed')
+    .slice(0, 4);
+  const styleChunks = questionMode === 'generated_only'
+    ? contentChunks.filter((chunk) => chunk.kind === 'question_bank' || chunk.kind === 'mixed').slice(0, 4)
+    : [];
+
+  return dedupeChunks([...mainChunks, ...fallbackChunks, ...styleChunks]);
+}
+
+function dedupeChunks(chunks) {
+  const seen = new Set();
+  return chunks.filter((chunk) => {
+    if (seen.has(chunk.id)) return false;
+    seen.add(chunk.id);
+    return true;
+  });
+}
+
+async function generateSupplementalQuestionsBatch({ apiKey, files, contentChunks, usedQuestions, questionCount, questionMode, focusTopic, signal }) {
   if (questionCount <= 0) return [];
 
   const generatedOnly = questionMode === 'generated_only';
-  const theoryContext = buildTheoryContext(files, { includeQuestionBanksAsStyle: generatedOnly });
+  const selectedChunks = selectFocusChunks(contentChunks, focusTopic, questionMode);
+  const theoryContext = selectedChunks.length
+    ? buildChunkContext(selectedChunks, generatedOnly ? 'CONTEUDO/FORMATO' : 'CONTEUDO')
+    : buildTheoryContext(files, { includeQuestionBanksAsStyle: generatedOnly });
   const existingTopics = usedQuestions
     .map((question) => question.topic || question.stem.slice(0, 120))
     .filter(Boolean)
@@ -359,6 +523,7 @@ Regras:
 - Uma unica alternativa correta.
 - Foque em condutas, diagnostico, criterios, classificacoes, limiares e diferencas importantes.
 - Evite repetir os temas das questoes ja extraidas.
+- Neste lote, priorize o foco tematico informado. Nao gere todas as questoes sobre o mesmo subtipo ou mesma conduta.
 - Se houver bancos de questoes no material, use-os como referencia forte de FORMATO: tamanho do enunciado, nivel de dificuldade, estilo das alternativas, linguagem, tipo de distrator, distribuicao de temas e forma de explicacao.
 - No modo "apenas questoes novas", voce deve gerar questoes ineditas no mesmo formato dos bancos enviados, mas sem copiar enunciados, alternativas ou casos clinicos especificos.
 - Responda somente JSON valido.
@@ -386,6 +551,10 @@ Formato obrigatorio:
 
 - ${existingTopics || 'Nenhum'}
 
+## FOCO DESTE LOTE
+
+${focusTopic}
+
 ## INSTRUCAO DE FORMATO
 
 ${generatedOnly
@@ -400,17 +569,22 @@ ${theoryContext}`,
   return normalizeQuestions(payload, 'generated').slice(0, questionCount);
 }
 
-async function generateSupplementalQuestions({ apiKey, files, usedQuestions, questionCount, questionMode, signal }) {
+async function generateSupplementalQuestions({ apiKey, files, contentChunks, usedQuestions, questionCount, questionMode, signal }) {
   const collected = [];
+  const topics = getGenerationTopics(contentChunks);
+  let batchIndex = 0;
 
   while (collected.length < questionCount) {
     const batchSize = Math.min(MAX_QUESTIONS_PER_CALL, questionCount - collected.length);
+    const focusTopic = topics[batchIndex % topics.length];
     const batch = await generateSupplementalQuestionsBatch({
       apiKey,
       files,
+      contentChunks,
       usedQuestions: [...usedQuestions, ...collected],
       questionCount: batchSize,
       questionMode,
+      focusTopic,
       signal,
     });
 
@@ -421,6 +595,7 @@ async function generateSupplementalQuestions({ apiKey, files, usedQuestions, que
     collected.push(...deduped);
 
     if (batch.length < batchSize) break;
+    batchIndex += 1;
   }
 
   return collected.slice(0, questionCount);
@@ -428,6 +603,7 @@ async function generateSupplementalQuestions({ apiKey, files, usedQuestions, que
 
 export async function buildQuizFromCorpus({ apiKey, files, questionMode = 'generated_only', questionCount = 12, signal }) {
   const classifiedFiles = classifyQuizFiles(files);
+  const contentChunks = buildContentIndex(classifiedFiles);
   const theoryContext = buildTheoryContext(classifiedFiles);
   const shouldExtractQuestions = questionMode === 'mixed';
   const extractedQuestions = shouldExtractQuestions
@@ -444,6 +620,7 @@ export async function buildQuizFromCorpus({ apiKey, files, questionMode = 'gener
   const generatedQuestions = await generateSupplementalQuestions({
     apiKey,
     files: classifiedFiles,
+    contentChunks,
     usedQuestions: extractedQuestions,
     questionCount: remainingCount,
     questionMode,
@@ -462,6 +639,10 @@ export async function buildQuizFromCorpus({ apiKey, files, questionMode = 'gener
 
   return {
     classifiedFiles,
+    contentIndex: {
+      chunkCount: contentChunks.length,
+      topics: [...new Set(contentChunks.map((chunk) => chunk.topic).filter(Boolean))],
+    },
     questionMode,
     extractedQuestions,
     generatedQuestions,
