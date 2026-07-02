@@ -184,6 +184,10 @@ function cleanText(value) {
     .trim();
 }
 
+export function cleanQuizText(value) {
+  return cleanText(value);
+}
+
 function normalizeCorpusFiles(files) {
   return files.map((file) => ({
     ...file,

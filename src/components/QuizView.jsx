@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { cleanQuizText } from '../services/quizApi';
 
 function getKindLabel(kind) {
   if (kind === 'question_bank') return 'Banco de questoes';
@@ -15,7 +16,7 @@ function getReadModeLabel(file) {
 }
 
 function getQuestionTopic(question) {
-  return question.balanceTopic || question.topic || 'Geral';
+  return cleanQuizText(question.balanceTopic || question.topic || 'Geral');
 }
 
 function buildQuizStats(questions, answers) {
@@ -91,7 +92,7 @@ export default function QuizView({
   const auditSummary = analysis?.auditSummary;
   const topicDistribution = auditSummary?.topicDistribution
     ? Object.entries(auditSummary.topicDistribution)
-        .map(([topic, count]) => `${topic}: ${count}`)
+        .map(([topic, count]) => `${cleanQuizText(topic)}: ${count}`)
         .join(' - ')
     : '';
   const canFinish = answeredCount === questions.length && questions.length > 0;
@@ -172,7 +173,7 @@ export default function QuizView({
                   </strong>
                 )}
               </div>
-              <h2>{question.stem}</h2>
+              <h2>{cleanQuizText(question.stem)}</h2>
               <div className="quiz-options">
                 {question.options.map((option, optionIndex) => {
                   const selectedOption = selected === optionIndex;
@@ -197,7 +198,7 @@ export default function QuizView({
                       disabled={answered || isFinished}
                     >
                       <span>{String.fromCharCode(65 + optionIndex)}</span>
-                      {option}
+                      {cleanQuizText(option)}
                     </button>
                   );
                 })}
@@ -205,9 +206,9 @@ export default function QuizView({
               {answered && (
                 <div className="quiz-explanation">
                   <strong>Explicacao</strong>
-                  <p>{question.explanation}</p>
-                  {question.topic && <span>Tema: {question.topic}</span>}
-                  {question.source && <span>{question.source}</span>}
+                  <p>{cleanQuizText(question.explanation)}</p>
+                  {question.topic && <span>Tema: {cleanQuizText(question.topic)}</span>}
+                  {question.source && <span>{cleanQuizText(question.source)}</span>}
                 </div>
               )}
             </article>
@@ -244,7 +245,7 @@ export default function QuizView({
               <div className="quiz-weak-list">
                 {stats.weakTopics.slice(0, 5).map((topic) => (
                   <div className="quiz-weak-row" key={topic.topic}>
-                    <span>{topic.topic}</span>
+                    <span>{cleanQuizText(topic.topic)}</span>
                     <strong>{topic.wrong}/{topic.total} erros</strong>
                   </div>
                 ))}
