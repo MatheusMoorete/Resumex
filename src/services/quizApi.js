@@ -6,6 +6,39 @@ const MAX_FILE_CHARS = 24000;
 const MAX_QUESTIONS_PER_CALL = 10;
 const MAX_CHUNK_CHARS = 4500;
 const AUDIT_BATCH_SIZE = 12;
+const MIN_AUDIT_SCORE = 78;
+const FINAL_SIMILARITY_THRESHOLD = 0.58;
+const RELAXED_SIMILARITY_THRESHOLD = 0.72;
+
+const WINDOWS_1252_BYTE_BY_CODE_POINT = {
+  0x20AC: 0x80,
+  0x201A: 0x82,
+  0x0192: 0x83,
+  0x201E: 0x84,
+  0x2026: 0x85,
+  0x2020: 0x86,
+  0x2021: 0x87,
+  0x02C6: 0x88,
+  0x2030: 0x89,
+  0x0160: 0x8A,
+  0x2039: 0x8B,
+  0x0152: 0x8C,
+  0x017D: 0x8E,
+  0x2018: 0x91,
+  0x2019: 0x92,
+  0x201C: 0x93,
+  0x201D: 0x94,
+  0x2022: 0x95,
+  0x2013: 0x96,
+  0x2014: 0x97,
+  0x02DC: 0x98,
+  0x2122: 0x99,
+  0x0161: 0x9A,
+  0x203A: 0x9B,
+  0x0153: 0x9C,
+  0x017E: 0x9E,
+  0x0178: 0x9F,
+};
 
 const TOPIC_RULES = [
   { topic: 'AVC isquemico e trombolise', keywords: ['avc isqu', 'trombol', 'nihss', 'ictus', 'wake-up', 'dwi', 'flair', 'alteplase', 'tenecteplase'] },
@@ -101,8 +134,67 @@ function repairAndParseQuizJson(candidate, originalError) {
   return { questions: items };
 }
 
+function mojibakeScore(text) {
+  return countMatches(text, /[\u00c2\u00c3\u00e2\u0192\u0080-\u009f]/g);
+}
+
+function decodeMojibakePass(text) {
+  if (typeof TextDecoder === 'undefined') return text;
+
+  const bytes = [];
+  for (const char of String(text || '')) {
+    const codePoint = char.codePointAt(0);
+    if (codePoint <= 0xff) {
+      bytes.push(codePoint);
+    } else if (WINDOWS_1252_BYTE_BY_CODE_POINT[codePoint]) {
+      bytes.push(WINDOWS_1252_BYTE_BY_CODE_POINT[codePoint]);
+    } else {
+      return text;
+    }
+  }
+
+  try {
+    return new TextDecoder('utf-8', { fatal: true }).decode(new Uint8Array(bytes));
+  } catch {
+    return text;
+  }
+}
+
+function repairMojibakeToken(token) {
+  let repaired = String(token || '');
+
+  for (let index = 0; index < 3; index++) {
+    const decoded = decodeMojibakePass(repaired);
+    if (!decoded || decoded === repaired) break;
+    if (mojibakeScore(decoded) > mojibakeScore(repaired)) break;
+    repaired = decoded;
+  }
+
+  return repaired
+    .replace(/\u00a0/g, ' ')
+    .replace(/[\u201c\u201d]/g, '"')
+    .replace(/[\u2018\u2019]/g, "'");
+}
+
+function cleanText(value) {
+  return String(value || '')
+    .replace(/\S*[\u00c2\u00c3\u00e2\u0192]\S*/g, (token) => repairMojibakeToken(token))
+    .replace(/\s+\n/g, '\n')
+    .replace(/[ \t]{2,}/g, ' ')
+    .trim();
+}
+
+function normalizeCorpusFiles(files) {
+  return files.map((file) => ({
+    ...file,
+    name: cleanText(file.name),
+    text: cleanText(file.text),
+    pageTexts: Array.isArray(file.pageTexts) ? file.pageTexts.map(cleanText) : file.pageTexts,
+  }));
+}
+
 function truncateText(text, maxChars) {
-  const source = String(text || '');
+  const source = cleanText(text);
   if (source.length <= maxChars) return source;
   return `${source.slice(0, maxChars)}\n\n[Texto truncado para caber no contexto do modelo]`;
 }
@@ -158,8 +250,8 @@ function inferTopic(text, fileName = '') {
 }
 
 function splitTextByPages(text) {
-  const source = String(text || '');
-  const pageRegex = /---\s*P(?:a|á|Ã¡)gina\s+(\d+)\s*---/gi;
+  const source = cleanText(text);
+  const pageRegex = /---\s*P(?:a|\u00e1)gina\s+(\d+)\s*---/gi;
   const pages = [];
   const matches = [...source.matchAll(pageRegex)];
 
@@ -216,18 +308,19 @@ function buildContentIndex(files) {
 export function classifyQuizFiles(files) {
   return files.map((file) => {
     const text = String(file.text || '').slice(0, 40000);
+    const normalized = normalizeText(text);
     const textLength = text.replace(/---[^\n]*---/g, '').trim().length;
     const questionSignals = [
-      countMatches(text, /quest(?:ao|ão|ões|oes)\s*\d+/gi) * 3,
+      countMatches(normalized, /quest(?:ao|oes)\s*\d+/g) * 3,
       countMatches(text, /\b[a-e]\)\s+\S/gi) * 2,
       countMatches(text, /\b[a-e][\.\-]\s+\S/gi),
       countMatches(text, /(?:^|\n)\s*\d{1,3}[\.\)]\s+\S/gm),
-      countMatches(text, /gabarito|resposta correta|alternativa correta|coment[aá]rio|enunciado/gi) * 2,
+      countMatches(normalized, /gabarito|resposta correta|alternativa correta|comentario|enunciado/g) * 2,
     ].reduce((sum, value) => sum + value, 0);
     const theorySignals = [
       countMatches(text, /^#{1,3}\s+/gm) * 2,
-      countMatches(text, /defini[cç][aã]o|etiologia|diagn[oó]stico|tratamento|conduta|classifica[cç][aã]o|fisiopatologia/gi),
-      countMatches(text, /---\s*p[aá]gina\s+\d+/gi),
+      countMatches(normalized, /definicao|etiologia|diagnostico|tratamento|conduta|classificacao|fisiopatologia/g),
+      countMatches(normalized, /---\s*pagina\s+\d+/g),
     ].reduce((sum, value) => sum + value, 0);
 
     let kind = 'theory';
@@ -323,16 +416,16 @@ function normalizeQuestions(payload, origin) {
     .map((question, index) => ({
       id: `${origin}-${question.id || index + 1}`,
       origin,
-      stem: String(question.stem || '').trim(),
+      stem: cleanText(question.stem),
       options: Array.isArray(question.options)
-        ? question.options.map((option) => String(option || '').trim()).filter(Boolean).slice(0, 5)
+        ? question.options.map((option) => cleanText(option)).filter(Boolean).slice(0, 5)
         : [],
       answerIndex: Number(question.answerIndex),
-      explanation: String(question.explanation || '').trim(),
-      topic: String(question.topic || '').trim(),
-      source: String(question.source || '').trim(),
-      sourceFile: String(question.sourceFile || '').trim(),
-      sourcePage: question.sourcePage ? String(question.sourcePage).trim() : '',
+      explanation: cleanText(question.explanation),
+      topic: cleanText(question.topic),
+      source: cleanText(question.source),
+      sourceFile: cleanText(question.sourceFile),
+      sourcePage: question.sourcePage ? cleanText(question.sourcePage) : '',
     }))
     .filter((question) => (
       question.stem
@@ -351,8 +444,8 @@ function normalizeAuditItems(payload) {
       id: String(item.id || '').trim(),
       approved: Boolean(item.approved),
       score: Number(item.score) || 0,
-      issue: String(item.issue || '').trim(),
-      topic: String(item.topic || '').trim(),
+      issue: cleanText(item.issue),
+      topic: cleanText(item.topic),
     }))
     .filter((item) => item.id);
 }
@@ -368,6 +461,8 @@ function stemTokens(stem) {
     'sobre', 'qual', 'quais', 'assinale', 'alternativa', 'correta', 'incorreta',
     'paciente', 'apresenta', 'em', 'de', 'da', 'do', 'das', 'dos', 'para', 'com',
     'uma', 'um', 'que', 'e', 'o', 'a', 'os', 'as', 'no', 'na', 'nos', 'nas',
+    'anos', 'entrada', 'admissao', 'mostra', 'principal', 'conduta', 'adequada',
+    'seguinte', 'diagnostico', 'provavel', 'mais',
   ]);
 
   return normalizeText(stem)
@@ -375,10 +470,10 @@ function stemTokens(stem) {
     .filter((token) => token.length > 3 && !stopwords.has(token));
 }
 
-function areSimilarQuestions(a, b) {
-  const aTokens = new Set(stemTokens(a.stem));
-  const bTokens = new Set(stemTokens(b.stem));
-  if (aTokens.size === 0 || bTokens.size === 0) return false;
+function questionSimilarity(a, b) {
+  const aTokens = new Set(stemTokens(`${a.topic || ''} ${a.stem}`));
+  const bTokens = new Set(stemTokens(`${b.topic || ''} ${b.stem}`));
+  if (aTokens.size === 0 || bTokens.size === 0) return 0;
 
   let intersection = 0;
   aTokens.forEach((token) => {
@@ -386,7 +481,11 @@ function areSimilarQuestions(a, b) {
   });
 
   const smaller = Math.min(aTokens.size, bTokens.size);
-  return intersection / smaller >= 0.68;
+  return intersection / smaller;
+}
+
+function areSimilarQuestions(a, b, threshold = 0.68) {
+  return questionSimilarity(a, b) >= threshold;
 }
 
 function dedupeQuestions(questions) {
@@ -530,6 +629,7 @@ async function generateSupplementalQuestionsBatch({ apiKey, files, contentChunks
     .map((question) => question.topic || question.stem.slice(0, 120))
     .filter(Boolean)
     .join('\n- ');
+  const skipList = buildSkipList(usedQuestions);
 
   const payload = await callDeepSeekJson({
     apiKey,
@@ -543,6 +643,7 @@ Regras:
 - Uma unica alternativa correta.
 - Foque em condutas, diagnostico, criterios, classificacoes, limiares e diferencas importantes.
 - Evite repetir os temas das questoes ja extraidas.
+- Nao gere questao parecida com enunciado ja usado, mesmo que mude nomes, idade, valores ou ordem das alternativas.
 - Neste lote, priorize o foco tematico informado. Nao gere todas as questoes sobre o mesmo subtipo ou mesma conduta.
 - Se houver bancos de questoes no material, use-os como referencia forte de FORMATO: tamanho do enunciado, nivel de dificuldade, estilo das alternativas, linguagem, tipo de distrator, distribuicao de temas e forma de explicacao.
 - No modo "apenas questoes novas", voce deve gerar questoes ineditas no mesmo formato dos bancos enviados, mas sem copiar enunciados, alternativas ou casos clinicos especificos.
@@ -570,6 +671,10 @@ Formato obrigatorio:
 ## TEMAS JA COBERTOS POR QUESTOES EXTRAIDAS
 
 - ${existingTopics || 'Nenhum'}
+
+## QUESTOES JA USADAS OU CANDIDATAS PROIBIDAS
+
+${skipList || 'Nenhuma.'}
 
 ## FOCO DESTE LOTE
 
@@ -652,8 +757,15 @@ Aprove somente se:
 - Nao ha erro clinico evidente.
 - A explicacao justifica a resposta.
 - A questao nao depende de conhecimento ausente do enunciado/material indicado.
+- A questao nao e repeticao obvia de outra questao do lote.
 
-Reprove questoes ambiguas, com alternativa correta ausente, com duas corretas, muito vagas ou muito decorativas.
+Seja seletivo:
+- Score 90-100: questao excelente, clinicamente precisa, sem ressalvas.
+- Score 78-89: questao boa, aproveitavel.
+- Score 60-77: questao mediana, so use se faltar alternativa melhor.
+- Abaixo de 60: questao ruim.
+
+Reprove questoes ambiguas, com alternativa correta ausente, com duas corretas, repetidas, muito vagas, muito decorativas ou baseadas em dado numerico incerto.
 Responda somente JSON valido.`,
     user: `Audite estas questoes e retorne JSON:
 
@@ -677,7 +789,77 @@ ${JSON.stringify(buildAuditQuestionPayload(questions))}`,
   return normalizeAuditItems(payload);
 }
 
-async function auditAndRankQuestions({ apiKey, questions, questionCount, signal }) {
+function getQuestionTopic(question) {
+  return cleanText(question.topic) || inferTopic(`${question.stem}\n${question.explanation}`, question.sourceFile);
+}
+
+function getTopicLimit(questions, questionCount) {
+  const topicCount = new Set(questions.map(getQuestionTopic).filter(Boolean)).size || 1;
+  const balancedTopicCount = Math.min(topicCount, 6);
+  return Math.max(2, Math.ceil(questionCount / balancedTopicCount) + 1);
+}
+
+function getTopicDistribution(questions) {
+  return questions.reduce((distribution, question) => {
+    const topic = getQuestionTopic(question);
+    distribution[topic] = (distribution[topic] || 0) + 1;
+    return distribution;
+  }, {});
+}
+
+function selectBalancedQuestions(ranked, questionCount, questionMode) {
+  const selected = [];
+  const selectedIds = new Set();
+  const topicCounts = new Map();
+  const maxPerTopic = getTopicLimit(ranked, questionCount);
+  const approved = ranked.filter((question) => question.audit?.approved && question.qualityScore >= MIN_AUDIT_SCORE);
+  const primaryPool = approved.length >= Math.ceil(questionCount * 0.65) ? approved : ranked;
+  const preferExtracted = questionMode === 'mixed';
+  const extractedTarget = preferExtracted
+    ? Math.min(Math.ceil(questionCount * 0.4), primaryPool.filter((question) => question.origin === 'extracted').length)
+    : 0;
+
+  function tryAdd(question, { enforceTopicLimit = true, threshold = FINAL_SIMILARITY_THRESHOLD } = {}) {
+    if (selected.length >= questionCount || selectedIds.has(question.id)) return false;
+
+    const topic = getQuestionTopic(question);
+    const currentTopicCount = topicCounts.get(topic) || 0;
+    if (enforceTopicLimit && currentTopicCount >= maxPerTopic) return false;
+
+    if (selected.some((existing) => areSimilarQuestions(existing, question, threshold))) return false;
+
+    selected.push({
+      ...question,
+      topic,
+    });
+    selectedIds.add(question.id);
+    topicCounts.set(topic, currentTopicCount + 1);
+    return true;
+  }
+
+  if (extractedTarget > 0) {
+    for (const question of primaryPool.filter((item) => item.origin === 'extracted')) {
+      tryAdd(question);
+      if (selected.filter((item) => item.origin === 'extracted').length >= extractedTarget) break;
+    }
+  }
+
+  for (const question of primaryPool) {
+    tryAdd(question);
+  }
+
+  for (const question of ranked) {
+    tryAdd(question, { threshold: RELAXED_SIMILARITY_THRESHOLD });
+  }
+
+  for (const question of ranked) {
+    tryAdd(question, { enforceTopicLimit: false, threshold: RELAXED_SIMILARITY_THRESHOLD });
+  }
+
+  return selected.slice(0, questionCount);
+}
+
+async function auditAndRankQuestions({ apiKey, questions, questionCount, questionMode, signal }) {
   const deduped = dedupeQuestions(questions).map((question, index) => ({
     ...question,
     id: `${question.origin}-candidate-${index + 1}`,
@@ -707,10 +889,8 @@ async function auditAndRankQuestions({ apiKey, questions, questionCount, signal 
       return (b.qualityScore || 0) - (a.qualityScore || 0);
     });
 
-  const approved = ranked.filter((question) => question.audit?.approved && question.qualityScore >= 70);
-  const fallback = ranked.filter((question) => !approved.includes(question));
-  const selected = [...approved, ...fallback]
-    .slice(0, questionCount)
+  const approved = ranked.filter((question) => question.audit?.approved && question.qualityScore >= MIN_AUDIT_SCORE);
+  const selected = selectBalancedQuestions(ranked, questionCount, questionMode)
     .map((question, index) => ({
       ...question,
       id: `${question.origin}-${index + 1}`,
@@ -723,12 +903,14 @@ async function auditAndRankQuestions({ apiKey, questions, questionCount, signal 
       audited: auditItems.length,
       approved: approved.length,
       delivered: selected.length,
+      topicDistribution: getTopicDistribution(selected),
     },
   };
 }
 
 export async function buildQuizFromCorpus({ apiKey, files, questionMode = 'generated_only', questionCount = 12, signal }) {
-  const classifiedFiles = classifyQuizFiles(files);
+  const normalizedFiles = normalizeCorpusFiles(files);
+  const classifiedFiles = classifyQuizFiles(normalizedFiles);
   const contentChunks = buildContentIndex(classifiedFiles);
   const theoryContext = buildTheoryContext(classifiedFiles);
   const shouldExtractQuestions = questionMode === 'mixed';
@@ -759,6 +941,7 @@ export async function buildQuizFromCorpus({ apiKey, files, questionMode = 'gener
     apiKey,
     questions: [...extractedQuestions, ...generatedQuestions],
     questionCount,
+    questionMode,
     signal,
   });
   const questions = rankedResult.questions;

@@ -30,6 +30,11 @@ export default function QuizView({ files, questions, analysis, onNewQuiz }) {
   const classifiedFiles = analysis?.classifiedFiles || files;
   const contentIndex = analysis?.contentIndex;
   const auditSummary = analysis?.auditSummary;
+  const topicDistribution = auditSummary?.topicDistribution
+    ? Object.entries(auditSummary.topicDistribution)
+        .map(([topic, count]) => `${topic}: ${count}`)
+        .join(' - ')
+    : '';
 
   return (
     <div className="quiz-view-section">
@@ -79,6 +84,7 @@ export default function QuizView({ files, questions, analysis, onNewQuiz }) {
               Auditoria: {auditSummary.approved}/{auditSummary.audited} aprovadas - {auditSummary.delivered} entregues
             </span>
           )}
+          {topicDistribution && <span>Distribuicao: {topicDistribution}</span>}
         </div>
       )}
 
