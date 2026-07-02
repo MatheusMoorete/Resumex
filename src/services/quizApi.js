@@ -43,7 +43,7 @@ const WINDOWS_1252_BYTE_BY_CODE_POINT = {
 const TOPIC_RULES = [
   { topic: 'AVC isquemico e trombolise', keywords: ['avc isqu', 'trombol', 'nihss', 'ictus', 'wake-up', 'dwi', 'flair', 'alteplase', 'tenecteplase'] },
   { topic: 'AVC hemorragico, HIP e HSA', keywords: ['hemorragia', 'hip', 'hsa', 'subaracn', 'intraparenquimatosa', 'nimodipina', 'hunt-hess', 'vasoespasmo'] },
-  { topic: 'TCE e neurotrauma', keywords: ['tce', 'traumatismo', 'glasgow', 'epidural', 'subdural', 'axonal', 'craniectomia', 'morte encefalica'] },
+  { topic: 'TCE e neurotrauma', keywords: ['tce', 'traumatismo', 'trauma', 'glasgow', 'epidural', 'extradural', 'subdural', 'axonal', 'craniectomia', 'morte encefalica', 'fratura de base', 'otorragia', 'liquorreia', 'fistula liquorica', 'sinal de battle', 'concussao', 'contusao', 'pneumoencefalo'] },
   { topic: 'Tumores neurologicos', keywords: ['tumor', 'glioma', 'meningioma', 'metastase', 'neoplasia', 'astrocitoma', 'glioblastoma'] },
   { topic: 'Dor e neurocirurgia funcional', keywords: ['dor', 'trigem', 'neuralgia', 'rizotomia', 'estimula', 'funcional', 'neuromodula'] },
   { topic: 'Coluna e medula', keywords: ['coluna', 'medula', 'radicul', 'mielopatia', 'hernia', 'estenose', 'compressao medular'] },
@@ -644,6 +644,8 @@ Regras:
 - Foque em condutas, diagnostico, criterios, classificacoes, limiares e diferencas importantes.
 - Evite repetir os temas das questoes ja extraidas.
 - Nao gere questao parecida com enunciado ja usado, mesmo que mude nomes, idade, valores ou ordem das alternativas.
+- Evite misturar calculo e conduta na mesma pergunta quando mais de uma conduta puder ser defensavel.
+- Se criar questao com calculo, apenas uma alternativa pode conter o valor correto.
 - Neste lote, priorize o foco tematico informado. Nao gere todas as questoes sobre o mesmo subtipo ou mesma conduta.
 - Se houver bancos de questoes no material, use-os como referencia forte de FORMATO: tamanho do enunciado, nivel de dificuldade, estilo das alternativas, linguagem, tipo de distrator, distribuicao de temas e forma de explicacao.
 - No modo "apenas questoes novas", voce deve gerar questoes ineditas no mesmo formato dos bancos enviados, mas sem copiar enunciados, alternativas ou casos clinicos especificos.
@@ -754,6 +756,8 @@ Aprove somente se:
 - Existe exatamente uma alternativa correta.
 - As alternativas erradas sao plausiveis, mas inequivocamente erradas.
 - Nao ha duas respostas defensaveis.
+- A alternativa marcada e completamente correta, nao apenas parcialmente correta.
+- Nao existe outra alternativa parcialmente correta que possa confundir a decisao.
 - Nao ha erro clinico evidente.
 - A explicacao justifica a resposta.
 - A questao nao depende de conhecimento ausente do enunciado/material indicado.
@@ -765,7 +769,7 @@ Seja seletivo:
 - Score 60-77: questao mediana, so use se faltar alternativa melhor.
 - Abaixo de 60: questao ruim.
 
-Reprove questoes ambiguas, com alternativa correta ausente, com duas corretas, repetidas, muito vagas, muito decorativas ou baseadas em dado numerico incerto.
+Reprove questoes ambiguas, com alternativa correta ausente, com duas corretas, com nenhuma alternativa plenamente correta, repetidas, muito vagas, muito decorativas ou baseadas em dado numerico incerto.
 Responda somente JSON valido.`,
     user: `Audite estas questoes e retorne JSON:
 
@@ -793,15 +797,24 @@ function getQuestionTopic(question) {
   return cleanText(question.topic) || inferTopic(`${question.stem}\n${question.explanation}`, question.sourceFile);
 }
 
+function getQuestionBalanceTopic(question) {
+  return inferTopic(
+    `${question.stem}\n${question.explanation}\n${question.topic}\n${question.source}\n${question.sourceFile}`,
+    question.sourceFile
+  );
+}
+
 function getTopicLimit(questions, questionCount) {
-  const topicCount = new Set(questions.map(getQuestionTopic).filter(Boolean)).size || 1;
+  const topicCount = new Set(questions.map(getQuestionBalanceTopic).filter(Boolean)).size || 1;
   const balancedTopicCount = Math.min(topicCount, 6);
-  return Math.max(2, Math.ceil(questionCount / balancedTopicCount) + 1);
+  const proportionalLimit = Math.ceil(questionCount / balancedTopicCount) + 1;
+  const hardLimit = topicCount >= 4 ? Math.ceil(questionCount * 0.25) : Math.ceil(questionCount * 0.34);
+  return Math.max(2, Math.min(proportionalLimit, hardLimit));
 }
 
 function getTopicDistribution(questions) {
   return questions.reduce((distribution, question) => {
-    const topic = getQuestionTopic(question);
+    const topic = getQuestionBalanceTopic(question);
     distribution[topic] = (distribution[topic] || 0) + 1;
     return distribution;
   }, {});
@@ -822,18 +835,19 @@ function selectBalancedQuestions(ranked, questionCount, questionMode) {
   function tryAdd(question, { enforceTopicLimit = true, threshold = FINAL_SIMILARITY_THRESHOLD } = {}) {
     if (selected.length >= questionCount || selectedIds.has(question.id)) return false;
 
-    const topic = getQuestionTopic(question);
-    const currentTopicCount = topicCounts.get(topic) || 0;
+    const balanceTopic = getQuestionBalanceTopic(question);
+    const currentTopicCount = topicCounts.get(balanceTopic) || 0;
     if (enforceTopicLimit && currentTopicCount >= maxPerTopic) return false;
 
     if (selected.some((existing) => areSimilarQuestions(existing, question, threshold))) return false;
 
     selected.push({
       ...question,
-      topic,
+      topic: getQuestionTopic(question),
+      balanceTopic,
     });
     selectedIds.add(question.id);
-    topicCounts.set(topic, currentTopicCount + 1);
+    topicCounts.set(balanceTopic, currentTopicCount + 1);
     return true;
   }
 
