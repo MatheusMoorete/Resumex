@@ -9,6 +9,7 @@ import ProcessingView from './components/ProcessingView';
 import ResultView from './components/ResultView';
 import QuizUpload from './components/QuizUpload';
 import QuizView from './components/QuizView';
+import QuizProcessingTimeline from './components/QuizProcessingTimeline';
 import { generateSummary } from './services/deepseekApi';
 import { buildQuizFromCorpus } from './services/quizApi';
 import { transcribePDFWithGLM } from './services/zhipuApi';
@@ -337,6 +338,7 @@ export default function App() {
   const [quizAnalysis, setQuizAnalysis] = useState(null);
   const [quizOptions, setQuizOptions] = useState({ questionMode: 'generated_only', questionCount: 15 });
   const [quizProcessingMessage, setQuizProcessingMessage] = useState('');
+  const [quizProcessingStage, setQuizProcessingStage] = useState('files');
   const [error, setError] = useState('');
 
   // Abort controller
@@ -488,6 +490,8 @@ export default function App() {
     setQuizAnalysis(null);
     setQuizOptions({ questionMode: 'generated_only', questionCount: 15 });
     setQuizProcessingMessage('');
+    setQuizProcessingStage('files');
+    setQuizProcessingStage('files');
     setError('');
     setAppState('quiz-upload');
   }, []);
@@ -514,6 +518,7 @@ export default function App() {
     setQuizAnalysis(null);
     setQuizOptions(nextQuizOptions);
     setError('');
+    setQuizProcessingStage(visualFiles.length > 0 ? 'vision' : 'files');
     setQuizProcessingMessage(
       visualFiles.length > 0
         ? 'Preparando PDFs com foto/imagem para leitura visual...'
@@ -522,8 +527,8 @@ export default function App() {
         : nextQuizOptions.practiceMode === 'different'
         ? 'Montando novo teste com perguntas diferentes...'
         : nextQuizOptions.questionMode === 'mixed'
-        ? 'Classificando arquivos, extraindo questoes existentes e preparando material teorico...'
-        : 'Classificando arquivos e usando bancos de questoes como referencia para gerar questoes novas...'
+        ? 'Classificando arquivos, extraindo questões existentes e preparando material teórico...'
+        : 'Classificando arquivos e usando bancos de questões como referência para gerar questões novas...'
     );
     setAppState('quiz-processing');
     abortControllerRef.current = new AbortController();
@@ -543,7 +548,8 @@ export default function App() {
           }
 
           const pagesToTranscribe = getQuizVisualPages(file);
-          setQuizProcessingMessage(`Convertendo ${file.name} em imagens (${pagesToTranscribe.length} paginas)...`);
+          setQuizProcessingStage('vision');
+          setQuizProcessingMessage(`Convertendo ${file.name} em imagens (${pagesToTranscribe.length} páginas)...`);
 
           const { images } = await renderPDFPagesToImages(file.file, {
             scale: 1.55,
@@ -552,7 +558,7 @@ export default function App() {
             maxPages: QUIZ_VISUAL_MAX_PAGES,
             pageNumbersToRender: pagesToTranscribe,
             onProgress: ({ current, total }) => {
-              setQuizProcessingMessage(`Renderizando ${file.name}: ${current}/${total} paginas.`);
+              setQuizProcessingMessage(`Renderizando ${file.name}: ${current}/${total} páginas.`);
             },
           });
 
@@ -564,7 +570,7 @@ export default function App() {
             totalPages: file.numPages,
             signal: abortControllerRef.current.signal,
             onProgress: ({ current, total }) => {
-              setQuizProcessingMessage(`Transcrevendo ${file.name}: ${current}/${total} paginas.`);
+              setQuizProcessingMessage(`Transcrevendo ${file.name}: ${current}/${total} páginas.`);
             },
           });
 
@@ -587,13 +593,14 @@ export default function App() {
 
       setQuizProcessingMessage(
         nextQuizOptions.practiceMode === 'focused'
-          ? 'Gerando questoes parecidas com os erros do aluno...'
+          ? 'Gerando questões parecidas com os erros do aluno...'
           : nextQuizOptions.practiceMode === 'different'
-          ? 'Gerando questoes diferentes das anteriores...'
+          ? 'Gerando questões diferentes das anteriores...'
           : nextQuizOptions.questionMode === 'mixed'
-          ? 'Classificando arquivos, extraindo questoes existentes e preparando material teorico...'
-          : 'Classificando arquivos e usando bancos de questoes como referencia para gerar questoes novas...'
+          ? 'Classificando arquivos, extraindo questões existentes e preparando material teórico...'
+          : 'Classificando arquivos e usando bancos de questões como referência para gerar questões novas...'
       );
+      setQuizProcessingStage('classify');
 
       const analysis = await buildQuizFromCorpus({
         apiKey: deepseekKey,
@@ -603,6 +610,10 @@ export default function App() {
         previousQuestions: options.previousQuestions || [],
         focusQuestions: options.focusQuestions || [],
         practiceMode: nextQuizOptions.practiceMode,
+        onProgress: ({ stage, message }) => {
+          if (stage) setQuizProcessingStage(stage);
+          if (message) setQuizProcessingMessage(message);
+        },
         signal: abortControllerRef.current.signal,
       });
       setQuizAnalysis(analysis);
@@ -627,6 +638,16 @@ export default function App() {
       focusQuestions: payload.focusQuestions || [],
     });
   }, [handleGenerateQuiz, quizAnalysis, quizFiles, quizOptions, quizQuestions]);
+
+  const handleCancelQuizProcessing = useCallback(() => {
+    if (abortControllerRef.current) abortControllerRef.current.abort();
+    setQuizQuestions([]);
+    setQuizAnalysis(null);
+    setQuizProcessingMessage('');
+    setQuizProcessingStage('files');
+    setError('');
+    setAppState('quiz-upload');
+  }, []);
 
   const handlePreferencesComplete = useCallback((prefs) => {
     setPreferences(prefs);
@@ -1017,6 +1038,7 @@ Você DEVE obrigatoriamente incluir e detalhar todas as informações, critério
     setQuizAnalysis(null);
     setQuizOptions({ questionMode: 'generated_only', questionCount: 15 });
     setQuizProcessingMessage('');
+    setQuizProcessingStage('files');
     setError('');
     setAppState('upload');
   }, [fileData]);
@@ -1157,6 +1179,7 @@ Você DEVE obrigatoriamente incluir e detalhar todas as informações, critério
             deepseekAvailable={hasDeepseekAccess}
             zhipuKey={zhipuKey}
             zhipuAvailable={hasZhipuAccess}
+            initialFiles={quizFiles}
             onOpenApiKeyModal={() => setShowApiKeyModal(true)}
             onGenerate={handleGenerateQuiz}
             onBack={handleNewSummary}
@@ -1248,17 +1271,11 @@ Você DEVE obrigatoriamente incluir e detalhar todas as informações, critério
         )}
 
         {appState === 'quiz-processing' && (
-          <div className="processing-section">
-            <div className="processing-animation">
-              <div className="processing-ring" style={{ borderTopColor: 'var(--accent-mint)' }} />
-              <div className="processing-ring" style={{ borderRightColor: 'var(--accent-cyan)', animationDirection: 'reverse' }} />
-              <div className="processing-core">Q</div>
-            </div>
-            <div className="processing-text">
-              <h3>Montando simulado</h3>
-              <p>{quizProcessingMessage || 'A IA esta extraindo questoes e usando a teoria para completar o teste.'}</p>
-            </div>
-          </div>
+          <QuizProcessingTimeline
+            stage={quizProcessingStage}
+            message={quizProcessingMessage}
+            onCancel={handleCancelQuizProcessing}
+          />
         )}
 
         {appState === 'result' && (

@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { cleanQuizText } from '../services/quizApi';
 
 function getKindLabel(kind) {
-  if (kind === 'question_bank') return 'Banco de questoes';
+  if (kind === 'question_bank') return 'Banco de questões';
   if (kind === 'mixed') return 'Misto';
   if (kind === 'needs_vision') return 'Precisa de OCR';
   return 'Teoria';
@@ -79,6 +79,7 @@ export default function QuizView({
 }) {
   const [answers, setAnswers] = useState({});
   const [isFinished, setIsFinished] = useState(false);
+  const [showFinishModal, setShowFinishModal] = useState(false);
 
   const answeredCount = Object.keys(answers).length;
   const stats = useMemo(() => buildQuizStats(questions, answers), [answers, questions]);
@@ -100,7 +101,13 @@ export default function QuizView({
   function resetCurrentTest() {
     setAnswers({});
     setIsFinished(false);
+    setShowFinishModal(false);
     window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  function finishTest() {
+    setIsFinished(true);
+    setShowFinishModal(true);
   }
 
   return (
@@ -108,7 +115,7 @@ export default function QuizView({
       <div className="quiz-view-header">
         <div>
           <span className="quiz-kicker">Teste gerado</span>
-          <h1>{questions.length} questoes para resolver</h1>
+          <h1>{questions.length} questões para resolver</h1>
           <p>{files.length} {files.length === 1 ? 'arquivo usado' : 'arquivos usados'} como base.</p>
         </div>
         <button className="btn btn-secondary" onClick={onNewQuiz}>Novo upload</button>
@@ -120,7 +127,7 @@ export default function QuizView({
           <strong>{answeredCount}/{questions.length}</strong>
         </div>
         <div>
-          <span>Pontuacao</span>
+          <span>Pontuação</span>
           <strong>{stats.correct}/{answeredCount || questions.length}{answeredCount > 0 ? ` (${percent}%)` : ''}</strong>
         </div>
         <div>
@@ -137,7 +144,7 @@ export default function QuizView({
         {classifiedFiles.map((file) => (
           <div className="quiz-corpus-file" key={`${file.name}-${file.size}`}>
             <strong>{file.name}</strong>
-            <span>{getKindLabel(file.kind)} - {getReadModeLabel(file)} - {file.numPages} paginas</span>
+            <span>{getKindLabel(file.kind)} - {getReadModeLabel(file)} - {file.numPages} páginas</span>
           </div>
         ))}
       </div>
@@ -151,7 +158,7 @@ export default function QuizView({
               Auditoria: {auditSummary.approved}/{auditSummary.audited} aprovadas - {auditSummary.delivered} entregues
             </span>
           )}
-          {topicDistribution && <span>Distribuicao: {topicDistribution}</span>}
+          {topicDistribution && <span>Distribuição: {topicDistribution}</span>}
         </div>
       )}
 
@@ -165,7 +172,7 @@ export default function QuizView({
             <article className="quiz-question-card" key={question.id}>
               <div className="quiz-question-top">
                 <span>
-                  Questao {index + 1} - {question.origin === 'extracted' ? 'extraida do banco' : 'gerada pela IA'}
+                  Questão {index + 1} - {question.origin === 'extracted' ? 'extraída do banco' : 'gerada pela IA'}
                 </span>
                 {answered && (
                   <strong className={isCorrect ? 'quiz-correct' : 'quiz-wrong'}>
@@ -205,7 +212,7 @@ export default function QuizView({
               </div>
               {answered && (
                 <div className="quiz-explanation">
-                  <strong>Explicacao</strong>
+                  <strong>Explicação</strong>
                   <p>{cleanQuizText(question.explanation)}</p>
                   {question.topic && <span>Tema: {cleanQuizText(question.topic)}</span>}
                   {question.source && <span>{cleanQuizText(question.source)}</span>}
@@ -216,88 +223,101 @@ export default function QuizView({
         })}
       </div>
 
-      {isFinished && (
-        <section className="quiz-finish-panel">
-          <div className="quiz-finish-header">
-            <span className="quiz-kicker">Estatisticas</span>
-            <h2>Resultado do teste</h2>
-            <p>{stats.correct} acertos, {stats.wrong} erros, {stats.percent}% de aproveitamento.</p>
-          </div>
+      {showFinishModal && (
+        <div className="quiz-result-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="quiz-result-title">
+          <section className="quiz-result-modal">
+            <div className="quiz-finish-panel">
+              <div className="quiz-finish-header">
+                <div>
+                  <span className="quiz-kicker">Estatísticas</span>
+                  <h2 id="quiz-result-title">Resultado do teste</h2>
+                  <p>{stats.correct} acertos, {stats.wrong} erros, {stats.percent}% de aproveitamento.</p>
+                </div>
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  onClick={() => setShowFinishModal(false)}
+                >
+                  Revisar respostas
+                </button>
+              </div>
 
-          <div className="quiz-finish-grid">
-            <div>
-              <span>Acertos</span>
-              <strong>{stats.correct}/{questions.length}</strong>
-            </div>
-            <div>
-              <span>Erros</span>
-              <strong>{stats.wrong}</strong>
-            </div>
-            <div>
-              <span>Aproveitamento</span>
-              <strong>{stats.percent}%</strong>
-            </div>
-          </div>
+              <div className="quiz-finish-grid">
+                <div>
+                  <span>Acertos</span>
+                  <strong>{stats.correct}/{questions.length}</strong>
+                </div>
+                <div>
+                  <span>Erros</span>
+                  <strong>{stats.wrong}</strong>
+                </div>
+                <div>
+                  <span>Aproveitamento</span>
+                  <strong>{stats.percent}%</strong>
+                </div>
+              </div>
 
-          <div className="quiz-weak-panel">
-            <strong>O que mais errou</strong>
-            {stats.weakTopics.length > 0 ? (
-              <div className="quiz-weak-list">
-                {stats.weakTopics.slice(0, 5).map((topic) => (
-                  <div className="quiz-weak-row" key={topic.topic}>
-                    <span>{cleanQuizText(topic.topic)}</span>
-                    <strong>{topic.wrong}/{topic.total} erros</strong>
+              <div className="quiz-weak-panel">
+                <strong>O que mais errou</strong>
+                {stats.weakTopics.length > 0 ? (
+                  <div className="quiz-weak-list">
+                    {stats.weakTopics.slice(0, 5).map((topic) => (
+                      <div className="quiz-weak-row" key={topic.topic}>
+                        <span>{cleanQuizText(topic.topic)}</span>
+                        <strong>{topic.wrong}/{topic.total} erros</strong>
+                      </div>
+                    ))}
                   </div>
-                ))}
+                ) : (
+                  <p>Nenhum tema com erro neste teste.</p>
+                )}
               </div>
-            ) : (
-              <p>Nenhum tema com erro neste teste.</p>
-            )}
-          </div>
 
-          {stats.wrongQuestions.length > 0 && (
-            <div className="quiz-weak-panel">
-              <strong>Questoes que vao orientar o treino</strong>
-              <div className="quiz-review-list">
-                {stats.wrongQuestions.slice(0, 6).map((question) => (
-                  <span key={question.id}>Questao {question.originalIndex}: {getQuestionTopic(question)}</span>
-                ))}
+              {stats.wrongQuestions.length > 0 && (
+                <div className="quiz-weak-panel">
+                  <strong>Questões que vão orientar o treino</strong>
+                  <div className="quiz-review-list">
+                    {stats.wrongQuestions.slice(0, 6).map((question) => (
+                      <span key={question.id}>Questão {question.originalIndex}: {getQuestionTopic(question)}</span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div className="quiz-finish-actions">
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  onClick={() => onGenerateVariant?.('different')}
+                >
+                  Novo teste diferente
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => onGenerateVariant?.('focused', { focusQuestions: stats.wrongQuestions })}
+                  disabled={stats.wrongQuestions.length === 0}
+                >
+                  Treinar meus erros
+                </button>
+                <button type="button" className="btn btn-secondary" onClick={onHome}>
+                  Voltar para home
+                </button>
               </div>
             </div>
-          )}
-
-          <div className="quiz-finish-actions">
-            <button
-              type="button"
-              className="btn btn-primary"
-              onClick={() => onGenerateVariant?.('different')}
-            >
-              Novo teste diferente
-            </button>
-            <button
-              type="button"
-              className="btn btn-secondary"
-              onClick={() => onGenerateVariant?.('focused', { focusQuestions: stats.wrongQuestions })}
-              disabled={stats.wrongQuestions.length === 0}
-            >
-              Treinar meus erros
-            </button>
-            <button type="button" className="btn btn-secondary" onClick={onHome}>
-              Voltar para home
-            </button>
-          </div>
-        </section>
+          </section>
+        </div>
       )}
 
       <div className="quiz-submit-bar">
         {!isFinished ? (
           <>
             <span className="quiz-submit-hint">
-              {canFinish ? 'Todas as questoes foram respondidas.' : `Responda ${questions.length - answeredCount} questoes para finalizar.`}
+              {canFinish ? 'Todas as questões foram respondidas.' : `Responda ${questions.length - answeredCount} questões para finalizar.`}
             </span>
             <button
               className="btn btn-primary btn-lg"
-              onClick={() => setIsFinished(true)}
+              onClick={finishTest}
               disabled={!canFinish}
             >
               Finalizar teste
@@ -307,6 +327,9 @@ export default function QuizView({
           <>
             <button className="btn btn-secondary" onClick={resetCurrentTest}>
               Refazer este teste
+            </button>
+            <button className="btn btn-secondary" onClick={() => setShowFinishModal(true)}>
+              Ver estatísticas
             </button>
             <button className="btn btn-primary" onClick={() => onGenerateVariant?.('different')}>
               Outro teste diferente

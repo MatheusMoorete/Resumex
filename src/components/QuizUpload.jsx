@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { extractTextFromPDF, formatFileSize } from '../services/pdfExtractor';
 
 const MAX_FILES = 5;
@@ -21,11 +21,12 @@ export default function QuizUpload({
   deepseekKey,
   zhipuAvailable,
   zhipuKey,
+  initialFiles = [],
   onOpenApiKeyModal,
   onGenerate,
   onBack,
 }) {
-  const [files, setFiles] = useState([]);
+  const [files, setFiles] = useState(initialFiles);
   const [questionMode, setQuestionMode] = useState('generated_only');
   const [questionCount, setQuestionCount] = useState(15);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -35,6 +36,10 @@ export default function QuizUpload({
 
   const hasDeepseekAccess = deepseekAvailable ?? !!deepseekKey;
   const hasZhipuAccess = zhipuAvailable ?? !!zhipuKey;
+
+  useEffect(() => {
+    setFiles(initialFiles || []);
+  }, [initialFiles]);
 
   const processFiles = useCallback(async (fileList) => {
     const selectedFiles = Array.from(fileList || []);
@@ -78,7 +83,7 @@ export default function QuizUpload({
       }
       setFiles(processed);
     } catch (err) {
-      setError(err.message || 'Nao foi possivel ler os PDFs.');
+      setError(err.message || 'Não foi possível ler os PDFs.');
     } finally {
       setProgress('');
       setIsProcessing(false);
@@ -127,8 +132,8 @@ export default function QuizUpload({
         <div className="quiz-upload-header">
           <button className="btn btn-ghost" onClick={onBack}>Voltar</button>
           <span className="quiz-kicker">MVP de testes</span>
-          <h1>Crie questoes a partir dos seus PDFs</h1>
-          <p>Envie ate 5 arquivos. Se algum PDF for foto de prova, escaneado ou tiver questoes em imagem, marque esse arquivo para leitura visual.</p>
+          <h1>Crie questões a partir dos seus PDFs</h1>
+          <p>Envie até 5 arquivos. Se algum PDF for foto de prova, escaneado ou tiver questões em imagem, marque esse arquivo para leitura visual.</p>
         </div>
 
         <div
@@ -142,7 +147,7 @@ export default function QuizUpload({
         >
           <div className="upload-icon">PDF</div>
           <strong>Selecionar PDFs</strong>
-          <span>Ate 5 arquivos. Depois voce informa quais precisam de leitura por imagem.</span>
+          <span>Até 5 arquivos. Depois você informa quais precisam de leitura por imagem.</span>
           <input
             ref={inputRef}
             className="upload-input"
@@ -171,7 +176,7 @@ export default function QuizUpload({
                 <div className="quiz-file-main">
                   <strong>{file.name}</strong>
                   <span className="quiz-file-meta">
-                    {file.numPages} paginas - {formatFileSize(file.size)} - {file.textLength} caracteres lidos
+                    {file.numPages} páginas - {formatFileSize(file.size)} - {file.textLength} caracteres lidos
                   </span>
                   {file.textLength < MIN_TEXT_CHARS_FOR_TEXT_MODE && (
                     <span className="quiz-file-alert">Pouco texto detectado. Se for foto de prova, deixe em imagem/OCR.</span>
@@ -205,7 +210,7 @@ export default function QuizUpload({
           <div className="quiz-vision-warning">
             <strong>Leitura visual ativada</strong>
             <span>
-              PDFs marcados como imagem/OCR serao convertidos em imagens e transcritos antes da analise. Isso demora mais e usa a API Zhipu/GLM visual.
+              PDFs marcados como imagem/OCR serão convertidos em imagens e transcritos antes da análise. Isso demora mais e usa a API Zhipu/GLM visual.
             </span>
           </div>
         )}
@@ -214,7 +219,7 @@ export default function QuizUpload({
           <div className="quiz-vision-warning">
             <strong>Arquivo com pouco texto</strong>
             <span>
-              Se esse PDF for foto, selecione imagem/OCR. Caso contrario ele pode quase nao contribuir para as questoes.
+              Se esse PDF for foto, selecione imagem/OCR. Caso contrário ele pode quase não contribuir para as questões.
             </span>
           </div>
         )}
@@ -222,9 +227,9 @@ export default function QuizUpload({
         {files.length > 0 && (
           <section className="quiz-mode-panel">
             <div>
-              <span className="quiz-kicker">Fonte das questoes</span>
+              <span className="quiz-kicker">Fonte das questões</span>
               <h2>Como montar o teste?</h2>
-              <p>Use bancos de questoes como inspiracao ou misture questoes reais extraidas dos arquivos.</p>
+              <p>Use bancos de questões como inspiração ou misture questões reais extraídas dos arquivos.</p>
             </div>
             <div className="quiz-mode-options">
               <button
@@ -232,16 +237,16 @@ export default function QuizUpload({
                 className={questionMode === 'generated_only' ? 'selected' : ''}
                 onClick={() => setQuestionMode('generated_only')}
               >
-                <strong>Apenas questoes novas</strong>
-                <span>Arquivos com questoes servem como modelo de estilo, tema e dificuldade.</span>
+                <strong>Apenas questões novas</strong>
+                <span>Arquivos com questões servem como modelo de estilo, tema e dificuldade.</span>
               </button>
               <button
                 type="button"
                 className={questionMode === 'mixed' ? 'selected' : ''}
                 onClick={() => setQuestionMode('mixed')}
               >
-                <strong>Misturar com questoes dos PDFs</strong>
-                <span>Extrai questoes existentes dos arquivos e completa com questoes novas.</span>
+                <strong>Misturar com questões dos PDFs</strong>
+                <span>Extrai questões existentes dos arquivos e completa com questões novas.</span>
               </button>
             </div>
           </section>
@@ -251,7 +256,7 @@ export default function QuizUpload({
           <section className="quiz-mode-panel">
             <div>
               <span className="quiz-kicker">Tamanho do simulado</span>
-              <h2>Quantas questoes?</h2>
+              <h2>Quantas questões?</h2>
               <p>Escolha a quantidade desejada. Simulados maiores podem demorar mais para gerar.</p>
             </div>
             <div className="quiz-count-options">

@@ -1004,8 +1004,13 @@ export async function buildQuizFromCorpus({
   previousQuestions = [],
   focusQuestions = [],
   practiceMode = 'default',
+  onProgress,
   signal,
 }) {
+  onProgress?.({
+    stage: 'classify',
+    message: 'Organizando os arquivos por tipo de conteúdo e tema.',
+  });
   const normalizedFiles = normalizeCorpusFiles(files);
   const classifiedFiles = classifyQuizFiles(normalizedFiles);
   const contentChunks = buildContentIndex(classifiedFiles);
@@ -1014,6 +1019,14 @@ export async function buildQuizFromCorpus({
   const targetCandidateCount = Math.ceil(questionCount * 1.45);
   const extractedTarget = shouldExtractQuestions ? Math.ceil(targetCandidateCount * 0.7) : 0;
   const seedQuestions = dedupeQuestions([...previousQuestions]);
+
+  if (shouldExtractQuestions) {
+    onProgress?.({
+      stage: 'extract',
+      message: 'Buscando questões existentes nos bancos enviados.',
+    });
+  }
+
   const extractedQuestions = shouldExtractQuestions
     ? await extractExistingQuestions({
         apiKey,
@@ -1026,6 +1039,14 @@ export async function buildQuizFromCorpus({
     : [];
 
   const remainingCount = Math.max(0, targetCandidateCount - extractedQuestions.length);
+  onProgress?.({
+    stage: 'generate',
+    message: practiceMode === 'focused'
+      ? 'Gerando novas questões parecidas com os erros do aluno.'
+      : practiceMode === 'different'
+      ? 'Gerando perguntas diferentes das que já apareceram.'
+      : 'Criando perguntas novas com base no conteúdo analisado.',
+  });
   const generatedQuestions = await generateSupplementalQuestions({
     apiKey,
     files: classifiedFiles,
@@ -1038,6 +1059,10 @@ export async function buildQuizFromCorpus({
     signal,
   });
 
+  onProgress?.({
+    stage: 'audit',
+    message: 'Revisando qualidade, repetição e equilíbrio entre os temas.',
+  });
   const rankedResult = await auditAndRankQuestions({
     apiKey,
     questions: filterPreviousQuestionCandidates(
@@ -1053,6 +1078,11 @@ export async function buildQuizFromCorpus({
   if (questions.length === 0) {
     throw new Error('Nao foi possivel extrair ou gerar questoes validas com esses PDFs.');
   }
+
+  onProgress?.({
+    stage: 'finish',
+    message: 'Teste pronto. Estamos abrindo as questões para você resolver.',
+  });
 
   return {
     classifiedFiles,
