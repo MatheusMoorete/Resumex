@@ -558,7 +558,7 @@ ${questionBankContext}`,
   return normalizeQuestions(payload, 'extracted').slice(0, questionCount);
 }
 
-async function extractExistingQuestions({ apiKey, files, theoryContext, questionCount, signal }) {
+async function extractExistingQuestions({ apiKey, files, theoryContext, questionCount, seedQuestions = [], signal }) {
   const collected = [];
 
   while (collected.length < questionCount) {
@@ -568,7 +568,7 @@ async function extractExistingQuestions({ apiKey, files, theoryContext, question
       files,
       theoryContext,
       questionCount: batchSize,
-      usedQuestions: collected,
+      usedQuestions: [...seedQuestions, ...collected],
       signal,
     });
 
@@ -584,7 +584,17 @@ async function extractExistingQuestions({ apiKey, files, theoryContext, question
   return collected.slice(0, questionCount);
 }
 
-function getGenerationTopics(contentChunks) {
+function getFocusTopics(focusQuestions) {
+  const topics = (focusQuestions || [])
+    .map((question) => getQuestionBalanceTopic(question))
+    .filter(Boolean);
+  return [...new Set(topics)];
+}
+
+function getGenerationTopics(contentChunks, { focusQuestions = [], practiceMode = 'default' } = {}) {
+  const focusTopics = practiceMode === 'focused' ? getFocusTopics(focusQuestions) : [];
+  if (focusTopics.length) return focusTopics;
+
   const theoryChunks = contentChunks.filter((chunk) => chunk.kind === 'theory' || chunk.kind === 'mixed');
   const sourceChunks = theoryChunks.length ? theoryChunks : contentChunks;
   const topics = [...new Set(sourceChunks.map((chunk) => chunk.topic).filter(Boolean))];
@@ -617,10 +627,32 @@ function dedupeChunks(chunks) {
   });
 }
 
-async function generateSupplementalQuestionsBatch({ apiKey, files, contentChunks, usedQuestions, questionCount, questionMode, focusTopic, signal }) {
+function buildWrongQuestionContext(focusQuestions) {
+  const questions = (focusQuestions || []).slice(0, 12);
+  if (questions.length === 0) return 'Nenhuma.';
+
+  return questions.map((question, index) => (
+    `${index + 1}. Tema: ${getQuestionBalanceTopic(question)}\nEnunciado errado: ${question.stem}\nExplicacao original: ${question.explanation || 'Sem explicacao.'}`
+  )).join('\n\n');
+}
+
+async function generateSupplementalQuestionsBatch({
+  apiKey,
+  files,
+  contentChunks,
+  usedQuestions,
+  questionCount,
+  questionMode,
+  focusTopic,
+  focusQuestions = [],
+  practiceMode = 'default',
+  signal,
+}) {
   if (questionCount <= 0) return [];
 
   const generatedOnly = questionMode === 'generated_only';
+  const focusedMode = practiceMode === 'focused' && focusQuestions.length > 0;
+  const differentMode = practiceMode === 'different';
   const selectedChunks = selectFocusChunks(contentChunks, focusTopic, questionMode);
   const theoryContext = selectedChunks.length
     ? buildChunkContext(selectedChunks, generatedOnly ? 'CONTEUDO/FORMATO' : 'CONTEUDO')
@@ -647,6 +679,8 @@ Regras:
 - Evite misturar calculo e conduta na mesma pergunta quando mais de uma conduta puder ser defensavel.
 - Se criar questao com calculo, apenas uma alternativa pode conter o valor correto.
 - Neste lote, priorize o foco tematico informado. Nao gere todas as questoes sobre o mesmo subtipo ou mesma conduta.
+- Quando estiver gerando novo teste diferente, troque caso clinico, pergunta central, distratores e tema especifico.
+- Quando estiver treinando erros do aluno, gere questoes novas do mesmo assunto e habilidade das questoes erradas, mas sem copiar o enunciado.
 - Se houver bancos de questoes no material, use-os como referencia forte de FORMATO: tamanho do enunciado, nivel de dificuldade, estilo das alternativas, linguagem, tipo de distrator, distribuicao de temas e forma de explicacao.
 - No modo "apenas questoes novas", voce deve gerar questoes ineditas no mesmo formato dos bancos enviados, mas sem copiar enunciados, alternativas ou casos clinicos especificos.
 - Responda somente JSON valido.
@@ -682,6 +716,18 @@ ${skipList || 'Nenhuma.'}
 
 ${focusTopic}
 
+## MODO DESTE LOTE
+
+${focusedMode
+  ? 'Treino de erros: gere questoes novas parecidas em habilidade, assunto e dificuldade com as questoes que o aluno errou. Nao copie os casos, numeros, alternativas nem enunciados.'
+  : differentMode
+  ? 'Novo teste diferente: evite fortemente qualquer questao parecida com as questoes ja usadas.'
+  : 'Simulado padrao.'}
+
+## QUESTOES QUE O ALUNO ERROU
+
+${focusedMode ? buildWrongQuestionContext(focusQuestions) : 'Nenhuma.'}
+
 ## INSTRUCAO DE FORMATO
 
 ${generatedOnly
@@ -696,9 +742,19 @@ ${theoryContext}`,
   return normalizeQuestions(payload, 'generated').slice(0, questionCount);
 }
 
-async function generateSupplementalQuestions({ apiKey, files, contentChunks, usedQuestions, questionCount, questionMode, signal }) {
+async function generateSupplementalQuestions({
+  apiKey,
+  files,
+  contentChunks,
+  usedQuestions,
+  questionCount,
+  questionMode,
+  focusQuestions = [],
+  practiceMode = 'default',
+  signal,
+}) {
   const collected = [];
-  const topics = getGenerationTopics(contentChunks);
+  const topics = getGenerationTopics(contentChunks, { focusQuestions, practiceMode });
   let batchIndex = 0;
 
   while (collected.length < questionCount) {
@@ -712,6 +768,8 @@ async function generateSupplementalQuestions({ apiKey, files, contentChunks, use
       questionCount: batchSize,
       questionMode,
       focusTopic,
+      focusQuestions,
+      practiceMode,
       signal,
     });
 
@@ -873,6 +931,18 @@ function selectBalancedQuestions(ranked, questionCount, questionMode) {
   return selected.slice(0, questionCount);
 }
 
+function filterPreviousQuestionCandidates(questions, previousQuestions, practiceMode) {
+  const previous = previousQuestions || [];
+  if (previous.length === 0) return questions;
+
+  const threshold = practiceMode === 'focused' ? 0.82 : FINAL_SIMILARITY_THRESHOLD;
+  const filtered = questions.filter((question) => (
+    !previous.some((previousQuestion) => areSimilarQuestions(previousQuestion, question, threshold))
+  ));
+
+  return filtered.length > 0 ? filtered : questions;
+}
+
 async function auditAndRankQuestions({ apiKey, questions, questionCount, questionMode, signal }) {
   const deduped = dedupeQuestions(questions).map((question, index) => ({
     ...question,
@@ -922,7 +992,16 @@ async function auditAndRankQuestions({ apiKey, questions, questionCount, questio
   };
 }
 
-export async function buildQuizFromCorpus({ apiKey, files, questionMode = 'generated_only', questionCount = 12, signal }) {
+export async function buildQuizFromCorpus({
+  apiKey,
+  files,
+  questionMode = 'generated_only',
+  questionCount = 12,
+  previousQuestions = [],
+  focusQuestions = [],
+  practiceMode = 'default',
+  signal,
+}) {
   const normalizedFiles = normalizeCorpusFiles(files);
   const classifiedFiles = classifyQuizFiles(normalizedFiles);
   const contentChunks = buildContentIndex(classifiedFiles);
@@ -930,12 +1009,14 @@ export async function buildQuizFromCorpus({ apiKey, files, questionMode = 'gener
   const shouldExtractQuestions = questionMode === 'mixed';
   const targetCandidateCount = Math.ceil(questionCount * 1.45);
   const extractedTarget = shouldExtractQuestions ? Math.ceil(targetCandidateCount * 0.7) : 0;
+  const seedQuestions = dedupeQuestions([...previousQuestions]);
   const extractedQuestions = shouldExtractQuestions
     ? await extractExistingQuestions({
         apiKey,
         files: classifiedFiles,
         theoryContext,
         questionCount: extractedTarget,
+        seedQuestions,
         signal,
       })
     : [];
@@ -945,15 +1026,21 @@ export async function buildQuizFromCorpus({ apiKey, files, questionMode = 'gener
     apiKey,
     files: classifiedFiles,
     contentChunks,
-    usedQuestions: extractedQuestions,
+    usedQuestions: [...seedQuestions, ...extractedQuestions],
     questionCount: remainingCount,
     questionMode,
+    focusQuestions,
+    practiceMode,
     signal,
   });
 
   const rankedResult = await auditAndRankQuestions({
     apiKey,
-    questions: [...extractedQuestions, ...generatedQuestions],
+    questions: filterPreviousQuestionCandidates(
+      [...extractedQuestions, ...generatedQuestions],
+      previousQuestions,
+      practiceMode
+    ),
     questionCount,
     questionMode,
     signal,
@@ -970,6 +1057,7 @@ export async function buildQuizFromCorpus({ apiKey, files, questionMode = 'gener
       topics: [...new Set(contentChunks.map((chunk) => chunk.topic).filter(Boolean))],
     },
     questionMode,
+    practiceMode,
     auditSummary: rankedResult.auditSummary,
     extractedQuestions,
     generatedQuestions,

@@ -292,6 +292,11 @@ function mergeQuizVisualText(file, transcribedTextMap, pagesToTranscribe) {
   }).join('\n\n');
 }
 
+function needsQuizVisionPreparation(file) {
+  const visualRequested = file?.requiresVision || file?.readMode === 'visual';
+  return Boolean(visualRequested && !file?.visualStatus);
+}
+
 export default function App() {
   const { isLoaded, isSignedIn, getToken } = useAuth();
   // Core state - DeepSeek generates text; GLM transcribes visual/handwritten pages.
@@ -330,6 +335,7 @@ export default function App() {
   const [quizFiles, setQuizFiles] = useState([]);
   const [quizQuestions, setQuizQuestions] = useState([]);
   const [quizAnalysis, setQuizAnalysis] = useState(null);
+  const [quizOptions, setQuizOptions] = useState({ questionMode: 'generated_only', questionCount: 15 });
   const [quizProcessingMessage, setQuizProcessingMessage] = useState('');
   const [error, setError] = useState('');
 
@@ -480,6 +486,7 @@ export default function App() {
     setQuizFiles([]);
     setQuizQuestions([]);
     setQuizAnalysis(null);
+    setQuizOptions({ questionMode: 'generated_only', questionCount: 15 });
     setQuizProcessingMessage('');
     setError('');
     setAppState('quiz-upload');
@@ -491,7 +498,12 @@ export default function App() {
       return;
     }
 
-    const visualFiles = files.filter((file) => file.requiresVision || file.readMode === 'visual');
+    const nextQuizOptions = {
+      questionMode: options.questionMode || quizOptions.questionMode || 'generated_only',
+      questionCount: options.questionCount || quizOptions.questionCount || 15,
+      practiceMode: options.practiceMode || 'default',
+    };
+    const visualFiles = files.filter(needsQuizVisionPreparation);
     if (visualFiles.length > 0 && !hasZhipuAccess) {
       setShowApiKeyModal(true);
       return;
@@ -500,11 +512,16 @@ export default function App() {
     setQuizFiles(files);
     setQuizQuestions([]);
     setQuizAnalysis(null);
+    setQuizOptions(nextQuizOptions);
     setError('');
     setQuizProcessingMessage(
       visualFiles.length > 0
         ? 'Preparando PDFs com foto/imagem para leitura visual...'
-        : options.questionMode === 'mixed'
+        : nextQuizOptions.practiceMode === 'focused'
+        ? 'Montando novo teste com foco nos erros...'
+        : nextQuizOptions.practiceMode === 'different'
+        ? 'Montando novo teste com perguntas diferentes...'
+        : nextQuizOptions.questionMode === 'mixed'
         ? 'Classificando arquivos, extraindo questoes existentes e preparando material teorico...'
         : 'Classificando arquivos e usando bancos de questoes como referencia para gerar questoes novas...'
     );
@@ -569,7 +586,11 @@ export default function App() {
       }
 
       setQuizProcessingMessage(
-        options.questionMode === 'mixed'
+        nextQuizOptions.practiceMode === 'focused'
+          ? 'Gerando questoes parecidas com os erros do aluno...'
+          : nextQuizOptions.practiceMode === 'different'
+          ? 'Gerando questoes diferentes das anteriores...'
+          : nextQuizOptions.questionMode === 'mixed'
           ? 'Classificando arquivos, extraindo questoes existentes e preparando material teorico...'
           : 'Classificando arquivos e usando bancos de questoes como referencia para gerar questoes novas...'
       );
@@ -577,8 +598,11 @@ export default function App() {
       const analysis = await buildQuizFromCorpus({
         apiKey: deepseekKey,
         files: quizSourceFiles,
-        questionMode: options.questionMode || 'generated_only',
-        questionCount: options.questionCount || 15,
+        questionMode: nextQuizOptions.questionMode,
+        questionCount: nextQuizOptions.questionCount,
+        previousQuestions: options.previousQuestions || [],
+        focusQuestions: options.focusQuestions || [],
+        practiceMode: nextQuizOptions.practiceMode,
         signal: abortControllerRef.current.signal,
       });
       setQuizAnalysis(analysis);
@@ -589,9 +613,21 @@ export default function App() {
       setError(err.message || 'Erro ao gerar o teste.');
       setAppState('error');
     }
-  }, [deepseekKey, hasDeepseekAccess, hasZhipuAccess, zhipuKey]);
+  }, [deepseekKey, hasDeepseekAccess, hasZhipuAccess, quizOptions.questionCount, quizOptions.questionMode, zhipuKey]);
 
   // --- Preferences selected → generate SPEC ---
+  const handleGenerateQuizVariant = useCallback((variant, payload = {}) => {
+    if (!quizFiles.length || !quizQuestions.length) return;
+
+    handleGenerateQuiz(quizFiles, {
+      questionMode: quizOptions.questionMode || quizAnalysis?.questionMode || 'generated_only',
+      questionCount: quizOptions.questionCount || quizQuestions.length || 15,
+      practiceMode: variant,
+      previousQuestions: quizQuestions,
+      focusQuestions: payload.focusQuestions || [],
+    });
+  }, [handleGenerateQuiz, quizAnalysis, quizFiles, quizOptions, quizQuestions]);
+
   const handlePreferencesComplete = useCallback((prefs) => {
     setPreferences(prefs);
 
@@ -979,6 +1015,7 @@ Você DEVE obrigatoriamente incluir e detalhar todas as informações, critério
     setQuizFiles([]);
     setQuizQuestions([]);
     setQuizAnalysis(null);
+    setQuizOptions({ questionMode: 'generated_only', questionCount: 15 });
     setQuizProcessingMessage('');
     setError('');
     setAppState('upload');
@@ -1003,6 +1040,7 @@ Você DEVE obrigatoriamente incluir e detalhar todas as informações, critério
     setQuizFiles([]);
     setQuizQuestions([]);
     setQuizAnalysis(null);
+    setQuizOptions({ questionMode: 'generated_only', questionCount: 15 });
     setQuizProcessingMessage('');
     setAppState('upload');
   }, [fileData]);
@@ -1240,6 +1278,8 @@ Você DEVE obrigatoriamente incluir e detalhar todas as informações, critério
             questions={quizQuestions}
             analysis={quizAnalysis}
             onNewQuiz={handleStartQuiz}
+            onGenerateVariant={handleGenerateQuizVariant}
+            onHome={handleNewSummary}
           />
         )}
 
