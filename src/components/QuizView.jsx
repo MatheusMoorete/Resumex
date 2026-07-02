@@ -3,7 +3,15 @@ import { useMemo, useState } from 'react';
 function getKindLabel(kind) {
   if (kind === 'question_bank') return 'Banco de questoes';
   if (kind === 'mixed') return 'Misto';
+  if (kind === 'needs_vision') return 'Precisa de OCR';
   return 'Teoria';
+}
+
+function getReadModeLabel(file) {
+  if (file.visualStatus === 'partial') return 'OCR parcial';
+  if (file.visualStatus === 'transcribed') return 'OCR visual';
+  if (file.readMode === 'visual') return 'Imagem/OCR';
+  return 'Texto';
 }
 
 export default function QuizView({ files, questions, analysis, onNewQuiz }) {
@@ -57,7 +65,7 @@ export default function QuizView({ files, questions, analysis, onNewQuiz }) {
         {classifiedFiles.map((file) => (
           <div className="quiz-corpus-file" key={`${file.name}-${file.size}`}>
             <strong>{file.name}</strong>
-            <span>{getKindLabel(file.kind)} · {file.numPages} paginas</span>
+            <span>{getKindLabel(file.kind)} - {getReadModeLabel(file)} - {file.numPages} paginas</span>
           </div>
         ))}
       </div>
@@ -65,10 +73,10 @@ export default function QuizView({ files, questions, analysis, onNewQuiz }) {
       {contentIndex && (
         <div className="quiz-index-panel">
           <strong>{contentIndex.chunkCount} blocos analisados</strong>
-          <span>{contentIndex.topics.slice(0, 8).join(' · ')}</span>
+          <span>{contentIndex.topics.slice(0, 8).join(' - ')}</span>
           {auditSummary && (
             <span>
-              Auditoria: {auditSummary.approved}/{auditSummary.audited} aprovadas · {auditSummary.delivered} entregues
+              Auditoria: {auditSummary.approved}/{auditSummary.audited} aprovadas - {auditSummary.delivered} entregues
             </span>
           )}
         </div>
@@ -84,7 +92,7 @@ export default function QuizView({ files, questions, analysis, onNewQuiz }) {
             <article className="quiz-question-card" key={question.id}>
               <div className="quiz-question-top">
                 <span>
-                  Questao {index + 1} · {question.origin === 'extracted' ? 'extraida do banco' : 'gerada pela IA'}
+                  Questao {index + 1} - {question.origin === 'extracted' ? 'extraida do banco' : 'gerada pela IA'}
                 </span>
                 {answered && (
                   <strong className={isCorrect ? 'quiz-correct' : 'quiz-wrong'}>

@@ -2,8 +2,29 @@ import { useCallback, useRef, useState } from 'react';
 import { extractTextFromPDF, formatFileSize } from '../services/pdfExtractor';
 
 const MAX_FILES = 5;
+const MIN_TEXT_CHARS_FOR_TEXT_MODE = 300;
 
-export default function QuizUpload({ deepseekAvailable, deepseekKey, onOpenApiKeyModal, onGenerate, onBack }) {
+function getTextLength(text) {
+  return String(text || '')
+    .replace(/---[^\n]*---/g, '')
+    .trim()
+    .length;
+}
+
+function getInitialReadMode(extracted) {
+  const textLength = getTextLength(extracted.text);
+  return textLength < MIN_TEXT_CHARS_FOR_TEXT_MODE ? 'visual' : 'text';
+}
+
+export default function QuizUpload({
+  deepseekAvailable,
+  deepseekKey,
+  zhipuAvailable,
+  zhipuKey,
+  onOpenApiKeyModal,
+  onGenerate,
+  onBack,
+}) {
   const [files, setFiles] = useState([]);
   const [questionMode, setQuestionMode] = useState('generated_only');
   const [questionCount, setQuestionCount] = useState(15);
@@ -13,6 +34,7 @@ export default function QuizUpload({ deepseekAvailable, deepseekKey, onOpenApiKe
   const inputRef = useRef(null);
 
   const hasDeepseekAccess = deepseekAvailable ?? !!deepseekKey;
+  const hasZhipuAccess = zhipuAvailable ?? !!zhipuKey;
 
   const processFiles = useCallback(async (fileList) => {
     const selectedFiles = Array.from(fileList || []);
@@ -38,12 +60,20 @@ export default function QuizUpload({ deepseekAvailable, deepseekKey, onOpenApiKe
         const file = selectedFiles[index];
         setProgress(`Lendo ${index + 1} de ${selectedFiles.length}: ${file.name}`);
         const extracted = await extractTextFromPDF(file);
+        const textLength = getTextLength(extracted.text);
+        const readMode = getInitialReadMode(extracted);
+
         processed.push({
           file,
           name: file.name,
           size: file.size,
           numPages: extracted.numPages,
+          pageTexts: extracted.pageTexts,
+          pageMetadata: extracted.pageMetadata,
           text: extracted.text,
+          textLength,
+          readMode,
+          requiresVision: readMode === 'visual',
         });
       }
       setFiles(processed);
@@ -55,13 +85,41 @@ export default function QuizUpload({ deepseekAvailable, deepseekKey, onOpenApiKe
     }
   }, []);
 
+  const updateFileReadMode = useCallback((targetFile, readMode) => {
+    setFiles((currentFiles) => currentFiles.map((file) => (
+      file.name === targetFile.name && file.size === targetFile.size
+        ? {
+            ...file,
+            readMode,
+            requiresVision: readMode === 'visual',
+          }
+        : file
+    )));
+  }, []);
+
   const handleSubmit = () => {
     if (!hasDeepseekAccess) {
       onOpenApiKeyModal();
       return;
     }
-    onGenerate(files, { questionMode, questionCount });
+
+    const hasVisualFiles = files.some((file) => file.readMode === 'visual' || file.requiresVision);
+    if (hasVisualFiles && !hasZhipuAccess) {
+      onOpenApiKeyModal();
+      return;
+    }
+
+    onGenerate(
+      files.map((file) => ({
+        ...file,
+        requiresVision: file.readMode === 'visual' || file.requiresVision,
+      })),
+      { questionMode, questionCount }
+    );
   };
+
+  const hasVisualFiles = files.some((file) => file.readMode === 'visual' || file.requiresVision);
+  const hasLowTextFiles = files.some((file) => file.textLength < MIN_TEXT_CHARS_FOR_TEXT_MODE);
 
   return (
     <div className="quiz-upload-section">
@@ -70,7 +128,7 @@ export default function QuizUpload({ deepseekAvailable, deepseekKey, onOpenApiKe
           <button className="btn btn-ghost" onClick={onBack}>Voltar</button>
           <span className="quiz-kicker">MVP de testes</span>
           <h1>Crie questoes a partir dos seus PDFs</h1>
-          <p>Envie ate 5 arquivos. O Resumex le o texto selecionavel e gera um teste objetivo para resolver aqui mesmo.</p>
+          <p>Envie ate 5 arquivos. Se algum PDF for foto de prova, escaneado ou tiver questoes em imagem, marque esse arquivo para leitura visual.</p>
         </div>
 
         <div
@@ -84,7 +142,7 @@ export default function QuizUpload({ deepseekAvailable, deepseekKey, onOpenApiKe
         >
           <div className="upload-icon">PDF</div>
           <strong>Selecionar PDFs</strong>
-          <span>Ate 5 arquivos, usando leitura textual rapida.</span>
+          <span>Ate 5 arquivos. Depois voce informa quais precisam de leitura por imagem.</span>
           <input
             ref={inputRef}
             className="upload-input"
@@ -110,12 +168,54 @@ export default function QuizUpload({ deepseekAvailable, deepseekKey, onOpenApiKe
           <div className="quiz-file-list">
             {files.map((file) => (
               <div className="quiz-file-row" key={`${file.name}-${file.size}`}>
-                <div>
+                <div className="quiz-file-main">
                   <strong>{file.name}</strong>
-                  <span>{file.numPages} paginas · {formatFileSize(file.size)}</span>
+                  <span className="quiz-file-meta">
+                    {file.numPages} paginas - {formatFileSize(file.size)} - {file.textLength} caracteres lidos
+                  </span>
+                  {file.textLength < MIN_TEXT_CHARS_FOR_TEXT_MODE && (
+                    <span className="quiz-file-alert">Pouco texto detectado. Se for foto de prova, deixe em imagem/OCR.</span>
+                  )}
+                  {file.readMode === 'visual' && (
+                    <span className="quiz-file-alert">Vai passar por leitura visual antes de gerar o teste.</span>
+                  )}
+                </div>
+                <div className="quiz-file-mode" aria-label={`Tipo de leitura para ${file.name}`}>
+                  <button
+                    type="button"
+                    className={file.readMode === 'text' ? 'selected' : ''}
+                    onClick={() => updateFileReadMode(file, 'text')}
+                  >
+                    Texto
+                  </button>
+                  <button
+                    type="button"
+                    className={file.readMode === 'visual' ? 'selected' : ''}
+                    onClick={() => updateFileReadMode(file, 'visual')}
+                  >
+                    Imagem/OCR
+                  </button>
                 </div>
               </div>
             ))}
+          </div>
+        )}
+
+        {hasVisualFiles && (
+          <div className="quiz-vision-warning">
+            <strong>Leitura visual ativada</strong>
+            <span>
+              PDFs marcados como imagem/OCR serao convertidos em imagens e transcritos antes da analise. Isso demora mais e usa a API Zhipu/GLM visual.
+            </span>
+          </div>
+        )}
+
+        {hasLowTextFiles && !hasVisualFiles && (
+          <div className="quiz-vision-warning">
+            <strong>Arquivo com pouco texto</strong>
+            <span>
+              Se esse PDF for foto, selecione imagem/OCR. Caso contrario ele pode quase nao contribuir para as questoes.
+            </span>
           </div>
         )}
 

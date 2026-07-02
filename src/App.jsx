@@ -268,6 +268,30 @@ function isRiskDecisionResolved(decision) {
   return true;
 }
 
+const QUIZ_VISUAL_MAX_PAGES = 60;
+
+function getQuizVisualPages(file) {
+  const totalPages = Number(file?.numPages) || 0;
+  return Array.from({ length: Math.min(totalPages, QUIZ_VISUAL_MAX_PAGES) }, (_, index) => index + 1);
+}
+
+function getQuizTextLength(text) {
+  return String(text || '').replace(/---[^\n]*---/g, '').trim().length;
+}
+
+function mergeQuizVisualText(file, transcribedTextMap, pagesToTranscribe) {
+  const pageSet = new Set(pagesToTranscribe);
+  const totalPages = Number(file?.numPages) || pagesToTranscribe.length;
+
+  return Array.from({ length: totalPages }, (_, index) => {
+    const pageNum = index + 1;
+    const visualText = transcribedTextMap?.[pageNum];
+    const textFallback = file.pageTexts?.[index] || '';
+    const pageText = pageSet.has(pageNum) && visualText ? visualText : textFallback;
+    return `--- Pagina ${pageNum} ---\n${pageText}`;
+  }).join('\n\n');
+}
+
 export default function App() {
   const { isLoaded, isSignedIn, getToken } = useAuth();
   // Core state - DeepSeek generates text; GLM transcribes visual/handwritten pages.
@@ -467,12 +491,20 @@ export default function App() {
       return;
     }
 
+    const visualFiles = files.filter((file) => file.requiresVision || file.readMode === 'visual');
+    if (visualFiles.length > 0 && !hasZhipuAccess) {
+      setShowApiKeyModal(true);
+      return;
+    }
+
     setQuizFiles(files);
     setQuizQuestions([]);
     setQuizAnalysis(null);
     setError('');
     setQuizProcessingMessage(
-      options.questionMode === 'mixed'
+      visualFiles.length > 0
+        ? 'Preparando PDFs com foto/imagem para leitura visual...'
+        : options.questionMode === 'mixed'
         ? 'Classificando arquivos, extraindo questoes existentes e preparando material teorico...'
         : 'Classificando arquivos e usando bancos de questoes como referencia para gerar questoes novas...'
     );
@@ -480,9 +512,71 @@ export default function App() {
     abortControllerRef.current = new AbortController();
 
     try {
+      let quizSourceFiles = files;
+
+      if (visualFiles.length > 0) {
+        const visualKeys = new Set(visualFiles.map((file) => `${file.name}-${file.size}`));
+        const preparedFiles = [];
+
+        for (const file of files) {
+          const needsVisual = visualKeys.has(`${file.name}-${file.size}`);
+          if (!needsVisual) {
+            preparedFiles.push(file);
+            continue;
+          }
+
+          const pagesToTranscribe = getQuizVisualPages(file);
+          setQuizProcessingMessage(`Convertendo ${file.name} em imagens (${pagesToTranscribe.length} paginas)...`);
+
+          const { images } = await renderPDFPagesToImages(file.file, {
+            scale: 1.55,
+            quality: 0.86,
+            format: 'image/jpeg',
+            maxPages: QUIZ_VISUAL_MAX_PAGES,
+            pageNumbersToRender: pagesToTranscribe,
+            onProgress: ({ current, total }) => {
+              setQuizProcessingMessage(`Renderizando ${file.name}: ${current}/${total} paginas.`);
+            },
+          });
+
+          setQuizProcessingMessage(`Lendo imagens de ${file.name} com GLM visual...`);
+          const transcribedTextMap = await transcribePDFWithGLM({
+            apiKey: zhipuKey,
+            pageImages: images,
+            pageNumbersToTranscribe: pagesToTranscribe,
+            totalPages: file.numPages,
+            signal: abortControllerRef.current.signal,
+            onProgress: ({ current, total }) => {
+              setQuizProcessingMessage(`Transcrevendo ${file.name}: ${current}/${total} paginas.`);
+            },
+          });
+
+          const visualText = mergeQuizVisualText(file, transcribedTextMap, pagesToTranscribe);
+          preparedFiles.push({
+            ...file,
+            text: visualText,
+            textLength: getQuizTextLength(visualText),
+            readMode: 'visual',
+            requiresVision: false,
+            visualStatus: pagesToTranscribe.length < file.numPages ? 'partial' : 'transcribed',
+            visualTranscribedPages: pagesToTranscribe,
+            transcribedTextMap,
+          });
+        }
+
+        quizSourceFiles = preparedFiles;
+        setQuizFiles(preparedFiles);
+      }
+
+      setQuizProcessingMessage(
+        options.questionMode === 'mixed'
+          ? 'Classificando arquivos, extraindo questoes existentes e preparando material teorico...'
+          : 'Classificando arquivos e usando bancos de questoes como referencia para gerar questoes novas...'
+      );
+
       const analysis = await buildQuizFromCorpus({
         apiKey: deepseekKey,
-        files,
+        files: quizSourceFiles,
         questionMode: options.questionMode || 'generated_only',
         questionCount: options.questionCount || 15,
         signal: abortControllerRef.current.signal,
@@ -495,7 +589,7 @@ export default function App() {
       setError(err.message || 'Erro ao gerar o teste.');
       setAppState('error');
     }
-  }, [deepseekKey, hasDeepseekAccess]);
+  }, [deepseekKey, hasDeepseekAccess, hasZhipuAccess, zhipuKey]);
 
   // --- Preferences selected → generate SPEC ---
   const handlePreferencesComplete = useCallback((prefs) => {
@@ -1023,6 +1117,8 @@ Você DEVE obrigatoriamente incluir e detalhar todas as informações, critério
           <QuizUpload
             deepseekKey={deepseekKey}
             deepseekAvailable={hasDeepseekAccess}
+            zhipuKey={zhipuKey}
+            zhipuAvailable={hasZhipuAccess}
             onOpenApiKeyModal={() => setShowApiKeyModal(true)}
             onGenerate={handleGenerateQuiz}
             onBack={handleNewSummary}

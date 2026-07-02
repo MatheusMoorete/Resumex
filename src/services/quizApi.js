@@ -216,10 +216,12 @@ function buildContentIndex(files) {
 export function classifyQuizFiles(files) {
   return files.map((file) => {
     const text = String(file.text || '').slice(0, 40000);
+    const textLength = text.replace(/---[^\n]*---/g, '').trim().length;
     const questionSignals = [
       countMatches(text, /quest(?:ao|ão|ões|oes)\s*\d+/gi) * 3,
-      countMatches(text, /\b[A-E]\)\s+\S/g) * 2,
-      countMatches(text, /\b[A-E][\.\-]\s+\S/g),
+      countMatches(text, /\b[a-e]\)\s+\S/gi) * 2,
+      countMatches(text, /\b[a-e][\.\-]\s+\S/gi),
+      countMatches(text, /(?:^|\n)\s*\d{1,3}[\.\)]\s+\S/gm),
       countMatches(text, /gabarito|resposta correta|alternativa correta|coment[aá]rio|enunciado/gi) * 2,
     ].reduce((sum, value) => sum + value, 0);
     const theorySignals = [
@@ -229,7 +231,9 @@ export function classifyQuizFiles(files) {
     ].reduce((sum, value) => sum + value, 0);
 
     let kind = 'theory';
-    if (questionSignals >= 12 && questionSignals >= theorySignals) {
+    if ((file.requiresVision || file.readMode === 'visual') && textLength < 300) {
+      kind = 'needs_vision';
+    } else if (questionSignals >= 12 && questionSignals >= theorySignals) {
       kind = 'question_bank';
     } else if (questionSignals >= 8 && theorySignals >= 6) {
       kind = 'mixed';
@@ -238,6 +242,7 @@ export function classifyQuizFiles(files) {
     return {
       ...file,
       kind,
+      textLength,
       questionSignals,
       theorySignals,
     };

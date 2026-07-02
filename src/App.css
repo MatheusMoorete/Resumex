@@ -941,6 +941,7 @@ select.input option {
 .quiz-file-row {
   display: flex;
   justify-content: space-between;
+  align-items: flex-start;
   gap: var(--space-md);
   padding: var(--space-md);
   background: var(--bg-glass);
@@ -948,9 +949,73 @@ select.input option {
   border-radius: var(--radius-md);
 }
 
-.quiz-file-row div {
+.quiz-file-main {
   display: grid;
-  gap: 2px;
+  gap: var(--space-xs);
+  min-width: 0;
+}
+
+.quiz-file-main strong {
+  word-break: break-word;
+}
+
+.quiz-file-alert {
+  color: var(--accent-amber) !important;
+}
+
+.quiz-file-mode {
+  display: flex;
+  flex: 0 0 auto;
+  gap: var(--space-xs);
+  padding: 3px;
+  background: rgba(255, 255, 255, 0.035);
+  border: 1px solid var(--border-glass);
+  border-radius: var(--radius-md);
+}
+
+.quiz-file-mode button {
+  min-height: 34px;
+  padding: 0 var(--space-sm);
+  color: var(--text-secondary);
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-family);
+  font-size: var(--font-size-xs);
+  font-weight: 800;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+
+.quiz-file-mode button:hover {
+  color: var(--text-primary);
+  background: var(--bg-glass-hover);
+}
+
+.quiz-file-mode button.selected {
+  color: #101211;
+  background: var(--accent-mint);
+}
+
+.quiz-vision-warning {
+  display: grid;
+  gap: var(--space-xs);
+  padding: var(--space-md);
+  color: var(--text-secondary);
+  background: rgba(213, 162, 83, 0.08);
+  border: 1px solid rgba(213, 162, 83, 0.22);
+  border-radius: var(--radius-md);
+}
+
+.quiz-vision-warning strong {
+  color: var(--accent-amber);
+  font-size: var(--font-size-sm);
+}
+
+.quiz-vision-warning span {
+  font-size: var(--font-size-sm);
+  line-height: 1.45;
 }
 
 .quiz-mode-panel {
@@ -3243,6 +3308,18 @@ select.input option {
 
   .quiz-mode-options {
     grid-template-columns: 1fr;
+  }
+
+  .quiz-file-row {
+    flex-direction: column;
+  }
+
+  .quiz-file-mode {
+    width: 100%;
+  }
+
+  .quiz-file-mode button {
+    flex: 1;
   }
 
   .quiz-progress-panel {
