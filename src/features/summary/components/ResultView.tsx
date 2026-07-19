@@ -3,14 +3,18 @@ import MarkdownPreview from '../../../shared/components/MarkdownPreview';
 import PdfSplitViewer from '../../pdf/components/PdfSplitViewer';
 import { copyToClipboard, stripPageReferences } from '../../../shared/utils/clipboard';
 import { exportSummaryToNotion } from '../../notion/services/notionApi';
+import { resolveCorpusPage } from '../../pdf/services/pdfCorpus';
 
-export default function ResultView({ pdfUrl, summary, summaryLog = '', missingPages = [], onRegenerateWithCoverage, onNewSummary }) {
-  const [viewMode, setViewMode] = useState(pdfUrl ? 'split' : 'preview'); // 'preview' | 'raw' | 'split'
+export default function ResultView({ fileData, pdfUrl, summary, summaryLog = '', missingPages = [], onRegenerateWithCoverage, onNewSummary, onCreateFlashcards }) {
+  const hasPdf = Boolean(fileData?.files?.length || pdfUrl);
+  const [viewMode, setViewMode] = useState(hasPdf ? 'split' : 'preview'); // 'preview' | 'raw' | 'split'
   const [showToast, setShowToast] = useState(false);
   const [toastMessage, setToastMessage] = useState('');
   const [isSendingToNotion, setIsSendingToNotion] = useState(false);
+  const [isCreatingFlashcards, setIsCreatingFlashcards] = useState(false);
   const [activePage, setActivePage] = useState(null);
   const [activeSourceText, setActiveSourceText] = useState('');
+  const activePdf = resolveCorpusPage(fileData || { pdfUrl }, activePage || 1);
 
   const showToastMessage = (message) => {
     setToastMessage(message);
@@ -46,36 +50,48 @@ export default function ResultView({ pdfUrl, summary, summaryLog = '', missingPa
     }
   };
 
+  const handleCreateFlashcards = async () => {
+    setIsCreatingFlashcards(true);
+    try {
+      await onCreateFlashcards?.();
+    } catch (error) {
+      showToastMessage(error.message || 'Não foi possível criar os flashcards.');
+    } finally {
+      setIsCreatingFlashcards(false);
+    }
+  };
+
   const handlePageClick = useCallback((pageNumber, sourceText = '') => {
     setActivePage(pageNumber);
     setActiveSourceText(sourceText);
 
-    if (pdfUrl && viewMode !== 'split') {
+    if (hasPdf && viewMode !== 'split') {
       setViewMode('split');
     }
-  }, [pdfUrl, viewMode]);
+  }, [hasPdf, viewMode]);
 
   return (
     <div className="result-section">
       <div className="result-toolbar">
         <div className="result-toolbar-left">
-          <button className="btn btn-ghost" onClick={onNewSummary}>
-            Novo resumo
-          </button>
+          <div className="result-toolbar-heading">
+            <span>RESUMO / FINALIZADO</span>
+            <button className="btn btn-ghost" onClick={onNewSummary}>Novo resumo</button>
+          </div>
           <div className="result-tab-group">
-            {pdfUrl && (
+            {hasPdf && (
               <button
                 className={`result-tab ${viewMode === 'split' ? 'active' : ''}`}
                 onClick={() => setViewMode('split')}
               >
-                Split View
+                PDF + resumo
               </button>
             )}
             <button
               className={`result-tab ${viewMode === 'preview' ? 'active' : ''}`}
               onClick={() => setViewMode('preview')}
             >
-              Preview
+              Resumo
             </button>
             <button
               className={`result-tab ${viewMode === 'raw' ? 'active' : ''}`}
@@ -97,9 +113,16 @@ export default function ResultView({ pdfUrl, summary, summaryLog = '', missingPa
         <div className="result-toolbar-right">
           {activePage && (
             <span className="active-page-indicator">
-              Pagina {activePage}
+              {activePdf.sourceName} · página {activePdf.pageNum}
             </span>
           )}
+          <button
+            className="btn btn-secondary"
+            onClick={handleCreateFlashcards}
+            disabled={isCreatingFlashcards}
+          >
+            {isCreatingFlashcards ? 'Criando flashcards…' : 'Criar flashcards'}
+          </button>
           <button
             className="btn btn-secondary"
             onClick={handleSendToNotion}
@@ -127,26 +150,18 @@ export default function ResultView({ pdfUrl, summary, summaryLog = '', missingPa
             className="btn btn-warning btn-sm"
             onClick={onRegenerateWithCoverage}
             id="btn-re-coverage"
-            style={{
-              background: 'linear-gradient(135deg, #fbbf24, #f59e0b)',
-              color: '#0f172a',
-              border: 'none',
-              padding: '6px 12px',
-              fontWeight: 600,
-              fontSize: 'var(--font-size-xs)',
-            }}
           >
-            Regerar com reforco de cobertura
+            Regerar com reforço de cobertura
           </button>
         </div>
       )}
 
-      <div className="result-body">
-        {viewMode === 'split' && pdfUrl && (
+      <div className={`result-body is-${viewMode}`}>
+        {viewMode === 'split' && activePdf.pdfUrl && (
           <div className="result-panel result-panel-pdf">
             <PdfSplitViewer
-              pdfUrl={pdfUrl}
-              activePage={activePage || 1}
+              pdfUrl={activePdf.pdfUrl}
+              activePage={activePdf.pageNum}
               sourceText={activeSourceText}
             />
           </div>

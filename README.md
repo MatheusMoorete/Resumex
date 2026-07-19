@@ -41,6 +41,10 @@ npm.cmd run build
 
 O build executa o typecheck antes de gerar `dist/`.
 
+## Qualidade de IA
+
+O roteamento por função, os pipelines de auditoria e reparo, as regras de falha fechada e os critérios de aceite estão documentados em [`docs/ai-quality-architecture.md`](docs/ai-quality-architecture.md).
+
 ## Estrutura do frontend
 
 ```text

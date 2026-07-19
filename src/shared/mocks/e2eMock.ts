@@ -30,6 +30,39 @@ Este resumo e um mock local para validar a exportacao ao Notion sem consumir tok
 - Status: mock E2E gerado localmente.
 `;
 
+export const mockEvidenceMap = `## Página 1
+
+### Conceitos centrais
+- Material clínico simulado para validar o fluxo local.
+- Toda informação permanece vinculada à página de origem.`;
+
+export const mockSpec = `# Plano do resumo
+
+## 1. Visão geral
+- Contextualizar o tema e os objetivos do material.
+
+## 2. Pontos principais
+- Organizar conceitos, critérios e condutas em tópicos.
+- Preservar a referência da página de origem.
+
+## 3. Revisão
+- Encerrar com perguntas para recordação ativa.`;
+
+export const mockSpecAudit = `**Status:** APROVADA
+
+O plano cobre o material de teste, preserva as referências e está pronto para revisão.`;
+
+export const mockSummaryLog = `## Auditoria local
+
+**Status:** APROVADO
+
+Fixture validada sem chamadas externas.`;
+
+export const mockFlashcardDrafts = [
+  { front: 'Qual é o objetivo do modo de teste local?', back: 'Validar todo o fluxo sem enviar um PDF ou consumir APIs.' },
+  { front: 'O material de teste funciona em produção?', back: 'Não. Ele fica disponível apenas em desenvolvimento no localhost.' },
+];
+
 export function createMockFileData() {
   return {
     file: null,

@@ -164,7 +164,239 @@ const providers = {
     baseUrl: 'https://api.z.ai/api/paas/v4',
     envKey: getProviderKey('ZHIPU_API_KEY', 'VITE_ZHIPU_API_KEY'),
   },
+  openai: {
+    baseUrl: 'https://api.openai.com/v1',
+    envKey: getProviderKey('OPENAI_API_KEY', 'VITE_OPENAI_API_KEY'),
+  },
+  kimi: {
+    baseUrl: 'https://api.moonshot.ai/v1',
+    envKey: getProviderKey('KIMI_API_KEY', 'VITE_KIMI_API_KEY'),
+  },
+  openrouter: {
+    baseUrl: 'https://openrouter.ai/api/v1',
+    envKey: getProviderKey('OPENROUTER_API_KEY', 'VITE_OPENROUTER_API_KEY'),
+  },
 };
+
+const aiModels = {
+  deepseekFlash: process.env.DEEPSEEK_FLASH_MODEL || 'deepseek-v4-flash',
+  deepseekPro: process.env.DEEPSEEK_PRO_MODEL || 'deepseek-v4-pro',
+  openaiAudit: process.env.OPENAI_AUDIT_MODEL || 'gpt-5.6-terra',
+  kimiAudit: process.env.KIMI_AUDIT_MODEL || 'kimi-k3',
+  openrouterAudit: process.env.OPENROUTER_AUDIT_MODEL || 'moonshotai/kimi-k3',
+  openrouterCriticalAudit: process.env.OPENROUTER_CRITICAL_AUDIT_MODEL || 'openai/gpt-5.6-terra-pro',
+};
+const gptAuditorEnabled = String(process.env.AI_ENABLE_GPT_AUDITOR || 'false').trim().toLowerCase() === 'true';
+
+const GENERATION_ROLES = new Set([
+  'evidence',
+  'spec',
+  'spec-correction',
+  'summary',
+  'summary-repair',
+  'quiz-extract',
+  'quiz-generate',
+  'flashcards',
+]);
+
+const AUDIT_ROLES = new Set(['spec-audit', 'summary-audit', 'quiz-audit']);
+const CRITICAL_AUDIT_ROLES = new Set([
+  'spec-audit-critical',
+  'summary-audit-critical',
+  'quiz-audit-critical',
+]);
+const SIMPLE_AUDIT_ROLES = new Set([
+  'spec-audit-simple',
+  'summary-audit-simple',
+  'quiz-audit-simple',
+]);
+const ALL_AUDIT_ROLES = new Set([...AUDIT_ROLES, ...CRITICAL_AUDIT_ROLES]);
+const FAST_ROLES = new Set([
+  'evidence',
+  'spec',
+  'spec-correction',
+  'quiz-extract',
+  'flashcards',
+  ...SIMPLE_AUDIT_ROLES,
+]);
+const ALLOWED_AI_ROLES = new Set([...GENERATION_ROLES, ...ALL_AUDIT_ROLES, ...SIMPLE_AUDIT_ROLES]);
+
+function getConfiguredAuditors(role = 'summary-audit') {
+  const requested = String(process.env.AI_PRIMARY_AUDITOR || 'openrouter').trim().toLowerCase();
+  const isCritical = CRITICAL_AUDIT_ROLES.has(role);
+
+  if (isCritical) {
+    const routes = [];
+    if (gptAuditorEnabled && providers.openrouter.envKey) {
+      routes.push({ providerName: 'openrouter', model: aiModels.openrouterCriticalAudit });
+    }
+    if (gptAuditorEnabled && providers.openai.envKey) {
+      routes.push({ providerName: 'openai', model: aiModels.openaiAudit });
+    }
+    if (providers.openrouter.envKey) {
+      routes.push({ providerName: 'openrouter', model: aiModels.openrouterAudit });
+    }
+    if (providers.kimi.envKey) {
+      routes.push({ providerName: 'kimi', model: aiModels.kimiAudit });
+    }
+    return routes;
+  }
+
+  const providerOrder = requested === 'openai'
+    ? ['openai', 'openrouter', 'kimi']
+    : requested === 'kimi'
+      ? ['kimi', 'openrouter', 'openai']
+      : ['openrouter', 'kimi', 'openai'];
+
+  return providerOrder.flatMap((providerName) => {
+    if (!providers[providerName]?.envKey) return [];
+    if (providerName === 'openai' && !gptAuditorEnabled) return [];
+    if (providerName === 'openrouter') {
+      return [{ providerName, model: aiModels.openrouterAudit }];
+    }
+    return [{
+      providerName,
+      model: providerName === 'kimi' ? aiModels.kimiAudit : aiModels.openaiAudit,
+    }];
+  });
+}
+
+function getConfiguredAuditor(role) {
+  return getConfiguredAuditors(role)[0] || null;
+}
+
+function resolveAiRoute(role) {
+  if (!ALLOWED_AI_ROLES.has(role)) return null;
+
+  if (ALL_AUDIT_ROLES.has(role)) {
+    return getConfiguredAuditor(role);
+  }
+
+  return {
+    providerName: 'deepseek',
+    model: FAST_ROLES.has(role) ? aiModels.deepseekFlash : aiModels.deepseekPro,
+  };
+}
+
+function normalizeAiPayload(body, route, role) {
+  const maxTokensByRole = {
+    evidence: 16000,
+    spec: 8192,
+    'spec-audit': 6144,
+    'spec-audit-simple': 4096,
+    'spec-audit-critical': 12288,
+    'spec-correction': 8192,
+    summary: 32000,
+    'summary-audit': 8192,
+    'summary-audit-simple': 4096,
+    'summary-audit-critical': 16384,
+    'summary-repair': 32000,
+    'quiz-extract': 8192,
+    'quiz-generate': 16384,
+    'quiz-audit': 8192,
+    'quiz-audit-simple': 6144,
+    'quiz-audit-critical': 16384,
+    flashcards: 8192,
+  };
+  const requestedMax = Number(body.max_tokens || body.max_completion_tokens || 0);
+  const roleMax = maxTokensByRole[role] || 16000;
+  const maxTokens = Math.max(1, Math.min(requestedMax || roleMax, roleMax));
+  const payload = {
+    ...body,
+    model: route.model,
+  };
+
+  if (role.startsWith('quiz-audit') && route.providerName !== 'deepseek') {
+    payload.response_format = {
+      type: 'json_schema',
+      json_schema: {
+        name: 'quiz_audit',
+        strict: true,
+        schema: {
+          type: 'object',
+          properties: {
+            items: {
+              type: 'array',
+              items: {
+                type: 'object',
+                properties: {
+                  id: { type: 'string' },
+                  approved: { type: 'boolean' },
+                  score: { type: 'number', minimum: 0, maximum: 100 },
+                  issue: { type: 'string' },
+                  topic: { type: 'string' },
+                },
+                required: ['id', 'approved', 'score', 'issue', 'topic'],
+                additionalProperties: false,
+              },
+            },
+          },
+          required: ['items'],
+          additionalProperties: false,
+        },
+      },
+    };
+  }
+
+  if (route.providerName === 'kimi') {
+    delete payload.max_tokens;
+    delete payload.temperature;
+    delete payload.top_p;
+    delete payload.thinking;
+    payload.max_completion_tokens = maxTokens;
+    payload.reasoning_effort = CRITICAL_AUDIT_ROLES.has(role) ? 'high' : 'medium';
+  } else if (route.providerName === 'openai') {
+    delete payload.max_tokens;
+    delete payload.temperature;
+    delete payload.top_p;
+    payload.max_completion_tokens = maxTokens;
+    payload.reasoning_effort = role.includes('audit') ? 'medium' : 'low';
+  } else if (route.providerName === 'openrouter') {
+    delete payload.max_completion_tokens;
+    delete payload.temperature;
+    delete payload.top_p;
+    delete payload.thinking;
+    payload.max_tokens = maxTokens;
+    if (route.model.includes('kimi-k3')) {
+      payload.reasoning_effort = CRITICAL_AUDIT_ROLES.has(role) ? 'high' : 'medium';
+    }
+  } else {
+    delete payload.max_completion_tokens;
+    payload.max_tokens = maxTokens;
+    if (SIMPLE_AUDIT_ROLES.has(role)) {
+      payload.thinking = { type: 'disabled' };
+      delete payload.reasoning_effort;
+    } else {
+      payload.thinking = { type: 'enabled' };
+      payload.reasoning_effort = ['summary', 'summary-repair', 'quiz-generate'].includes(role)
+        ? 'max'
+        : 'high';
+    }
+    if (payload.stream) {
+      payload.stream_options = { ...(payload.stream_options || {}), include_usage: true };
+    }
+  }
+
+  return payload;
+}
+
+function logAiUsage({ role, providerName, model, usage, finishReason, durationMs }) {
+  console.info(JSON.stringify({
+    event: 'ai_usage',
+    role,
+    provider: providerName,
+    model,
+    promptTokens: usage?.prompt_tokens ?? usage?.input_tokens ?? null,
+    completionTokens: usage?.completion_tokens ?? usage?.output_tokens ?? null,
+    reasoningTokens: usage?.completion_tokens_details?.reasoning_tokens
+      ?? usage?.output_tokens_details?.reasoning_tokens
+      ?? null,
+    cachedTokens: usage?.prompt_cache_hit_tokens ?? usage?.cached_tokens ?? null,
+    costUsd: usage?.cost ?? null,
+    finishReason: finishReason || null,
+    durationMs,
+  }));
+}
 
 app.get('/api/health', (_req, res) => {
   res.json({ ok: true });
@@ -191,9 +423,51 @@ app.post('/api/auth/logout', (_req, res) => {
 });
 
 app.get('/api/config', requireAuth, (_req, res) => {
+  const auditor = getConfiguredAuditor();
+  const criticalAuditor = getConfiguredAuditor('summary-audit-critical');
   res.json({
     deepseekConfigured: Boolean(providers.deepseek.envKey),
     zhipuConfigured: Boolean(providers.zhipu.envKey),
+    auditorConfigured: Boolean(auditor),
+    auditorProvider: auditor?.providerName || null,
+    gptAuditorEnabled,
+    models: {
+      localPdfExtraction: {
+        provider: 'local',
+        model: 'pdf.js',
+        roles: ['pdf-text-extraction'],
+      },
+      fastText: {
+        provider: 'deepseek',
+        model: aiModels.deepseekFlash,
+        roles: ['evidence', 'spec', 'spec-correction', 'quiz-extract', 'flashcards'],
+      },
+      generation: {
+        provider: 'deepseek',
+        model: aiModels.deepseekPro,
+        roles: ['summary', 'summary-repair', 'quiz-generate'],
+      },
+      simpleAudit: {
+        provider: 'deepseek',
+        model: aiModels.deepseekFlash,
+        roles: [...SIMPLE_AUDIT_ROLES],
+      },
+      routineAudit: {
+        provider: auditor?.providerName || null,
+        model: auditor?.model || null,
+        roles: [...AUDIT_ROLES],
+      },
+      criticalAudit: {
+        provider: criticalAuditor?.providerName || null,
+        model: criticalAuditor?.model || null,
+        roles: [...CRITICAL_AUDIT_ROLES],
+      },
+      vision: {
+        provider: 'zhipu',
+        model: 'glm-4.5v',
+        roles: ['visual-transcription'],
+      },
+    },
     notionConfigured: Boolean(notionApiKey && notionParentPageId),
   });
 });
@@ -527,6 +801,180 @@ app.post(
       res.status(502).json({
         error: {
           message: error instanceof Error ? error.message : 'Notion export failed.',
+        },
+      });
+    }
+  }
+);
+
+app.post(
+  '/api/ai/chat/completions',
+  requireAuth,
+  rateLimit({ windowMs: 60 * 60 * 1000, max: 120, name: 'ai-orchestrator' }),
+  async (req, res) => {
+    const role = String(req.body?.role || '').trim();
+    const providerAuth = req.get('x-provider-authorization');
+    const primaryRoute = resolveAiRoute(role);
+
+    if (!primaryRoute) {
+      if (ALL_AUDIT_ROLES.has(role)) {
+        res.status(503).json({
+          error: {
+            message: 'Independent audit is not configured. Set OPENROUTER_API_KEY, KIMI_API_KEY or OPENAI_API_KEY.',
+          },
+        });
+        return;
+      }
+      res.status(400).json({ error: { message: `Unknown AI role: ${role || 'missing'}.` } });
+      return;
+    }
+
+    if (!req.body || !Array.isArray(req.body.messages)) {
+      res.status(400).json({ error: { message: 'Invalid chat completion payload.' } });
+      return;
+    }
+
+    const { role: _role, ...clientBody } = req.body;
+    const startedAt = Date.now();
+
+    try {
+      const routeCandidates = ALL_AUDIT_ROLES.has(role) ? getConfiguredAuditors(role) : [primaryRoute];
+      let route = primaryRoute;
+      let payload;
+      let upstreamResponse;
+
+      for (let index = 0; index < routeCandidates.length; index += 1) {
+        route = routeCandidates[index];
+        const provider = providers[route.providerName];
+        const authorization = route.providerName === 'deepseek' && providerAuth
+          ? providerAuth
+          : provider.envKey
+            ? `Bearer ${provider.envKey}`
+            : '';
+
+        if (!authorization) {
+          if (index < routeCandidates.length - 1) continue;
+          throw new Error(`Missing API key for ${route.providerName}.`);
+        }
+
+        payload = normalizeAiPayload(clientBody, route, role);
+        const abortController = new AbortController();
+        const timeout = setTimeout(() => abortController.abort(), upstreamTimeoutMs);
+        try {
+          const upstreamHeaders = {
+            'Content-Type': 'application/json',
+            'Accept-Language': req.get('accept-language') || 'en-US,en',
+            Authorization: authorization,
+          };
+          if (route.providerName === 'openrouter') {
+            upstreamHeaders['HTTP-Referer'] = process.env.OPENROUTER_SITE_URL || 'https://resumex.app';
+            upstreamHeaders['X-OpenRouter-Title'] = process.env.OPENROUTER_APP_TITLE || 'ResumeX';
+          }
+
+          upstreamResponse = await fetch(`${provider.baseUrl}/chat/completions`, {
+            method: 'POST',
+            headers: upstreamHeaders,
+            body: JSON.stringify(payload),
+            signal: abortController.signal,
+          });
+        } catch (error) {
+          if (index >= routeCandidates.length - 1) throw error;
+          console.warn(JSON.stringify({
+            event: 'ai_provider_fallback',
+            role,
+            failedProvider: route.providerName,
+            failedModel: route.model,
+            reason: error instanceof Error ? error.message : 'request_failed',
+          }));
+          continue;
+        } finally {
+          clearTimeout(timeout);
+        }
+
+        if (upstreamResponse.ok || index >= routeCandidates.length - 1) break;
+
+        console.warn(JSON.stringify({
+          event: 'ai_provider_fallback',
+          role,
+          failedProvider: route.providerName,
+          failedModel: route.model,
+          status: upstreamResponse.status,
+        }));
+        await upstreamResponse.body?.cancel();
+      }
+
+      if (!upstreamResponse || !payload) throw new Error('No configured AI provider was available.');
+
+      res.status(upstreamResponse.status);
+      res.setHeader('X-AI-Provider', route.providerName);
+      res.setHeader('X-AI-Model', route.model);
+      res.setHeader('X-AI-Role', role);
+      const contentType = upstreamResponse.headers.get('content-type');
+      if (contentType) res.setHeader('Content-Type', contentType);
+
+      if (!upstreamResponse.body) {
+        res.end();
+        return;
+      }
+
+      if (!payload.stream) {
+        const responseText = await upstreamResponse.text();
+        try {
+          const parsed = JSON.parse(responseText);
+          logAiUsage({
+            role,
+            providerName: route.providerName,
+            model: route.model,
+            usage: parsed.usage,
+            finishReason: parsed.choices?.[0]?.finish_reason,
+            durationMs: Date.now() - startedAt,
+          });
+        } catch {}
+        res.send(responseText);
+        return;
+      }
+
+      const reader = upstreamResponse.body.getReader();
+      const decoder = new TextDecoder();
+      let observationBuffer = '';
+      let usage = null;
+      let finishReason = null;
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        res.write(Buffer.from(value));
+        observationBuffer += decoder.decode(value, { stream: true });
+        const lines = observationBuffer.split('\n');
+        observationBuffer = lines.pop() || '';
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed.startsWith('data: ') || trimmed === 'data: [DONE]') continue;
+          try {
+            const parsed = JSON.parse(trimmed.slice(6));
+            usage = parsed.usage || usage;
+            finishReason = parsed.choices?.[0]?.finish_reason || finishReason;
+          } catch {}
+        }
+      }
+
+      logAiUsage({
+        role,
+        providerName: route.providerName,
+        model: route.model,
+        usage,
+        finishReason,
+        durationMs: Date.now() - startedAt,
+      });
+      res.end();
+    } catch (error) {
+      if (res.headersSent) {
+        res.end();
+        return;
+      }
+      res.status(502).json({
+        error: {
+          message: error instanceof Error ? error.message : 'AI upstream request failed.',
         },
       });
     }

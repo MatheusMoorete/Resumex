@@ -21,7 +21,7 @@ export default function AuthScreen() {
     setError('');
 
     try {
-      await authService.signInWithGoogle(window.location.origin);
+      await authService.signInWithGoogle(`${window.location.origin}/app`);
     } catch (error) {
       setError(error instanceof Error ? error.message : 'Não foi possível entrar.');
       setIsRedirecting(false);
@@ -34,24 +34,23 @@ export default function AuthScreen() {
       <main className="auth-login-shell" aria-labelledby="auth-title">
         <section className="auth-login-intro">
           <div className="auth-wordmark" aria-label="Resumex">
-            <span className="auth-wordmark-symbol">Rx</span>
-            <span>Resumex</span>
+            <span>resumex</span><b>!</b>
           </div>
           <div className="auth-login-copy">
-            <p className="auth-eyebrow">Sua área de estudos</p>
-            <h1 id="auth-title">Transforme material em conhecimento.</h1>
+            <p className="auth-eyebrow">MODO FOCO: ON</p>
+            <h1 id="auth-title">O estudo entra.<br /><em>A clareza fica.</em></h1>
             <p>
-              Crie resumos estruturados e quizzes a partir dos seus PDFs, sem perder o contexto importante.
+              Resumos, simulados e flashcards organizados a partir dos seus próprios materiais.
             </p>
           </div>
-          <p className="auth-intro-note">Leitura. Síntese. Revisão.</p>
+          <div className="auth-intro-note"><span>RESUMO</span><b>✳</b><span>SIMULADO</span><b>✳</b><span>FLASHCARDS</span></div>
         </section>
 
         <section className="auth-login-card" aria-labelledby="auth-card-title">
           <div className="auth-card-heading">
-            <p className="auth-eyebrow">Bem-vindo</p>
-            <h2 id="auth-card-title">Entre na sua conta</h2>
-            <p>Use sua conta Google para continuar no Resumex.</p>
+            <p className="auth-eyebrow">SUA MESA DE ESTUDOS</p>
+            <h2 id="auth-card-title">Puxe uma cadeira.</h2>
+            <p>Entre com sua conta Google para continuar de onde parou.</p>
           </div>
 
           <button

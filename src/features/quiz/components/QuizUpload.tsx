@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { extractTextFromPDF, formatFileSize } from '../../pdf/services/pdfExtractor';
+import FicharioPanelHeader from '../../../shared/components/FicharioPanelHeader';
+import FicharioPdfDropzone from '../../../shared/components/FicharioPdfDropzone';
 
 const MAX_FILES = 5;
 const MIN_TEXT_CHARS_FOR_TEXT_MODE = 300;
@@ -24,7 +26,6 @@ export default function QuizUpload({
   initialFiles = [],
   onOpenApiKeyModal,
   onGenerate,
-  onBack,
 }) {
   const [files, setFiles] = useState(initialFiles);
   const [questionMode, setQuestionMode] = useState('generated_only');
@@ -32,7 +33,7 @@ export default function QuizUpload({
   const [isProcessing, setIsProcessing] = useState(false);
   const [progress, setProgress] = useState('');
   const [error, setError] = useState('');
-  const inputRef = useRef(null);
+  const inputRef = useRef<HTMLInputElement | null>(null);
 
   const hasDeepseekAccess = deepseekAvailable ?? !!deepseekKey;
   const hasZhipuAccess = zhipuAvailable ?? !!zhipuKey;
@@ -127,36 +128,23 @@ export default function QuizUpload({
   const hasLowTextFiles = files.some((file) => file.textLength < MIN_TEXT_CHARS_FOR_TEXT_MODE);
 
   return (
-    <div className="quiz-upload-section">
+    <div className="quiz-upload-section is-embedded">
       <div className="quiz-upload-shell">
-        <div className="quiz-upload-header">
-          <button className="btn btn-ghost" onClick={onBack}>Voltar</button>
-          <span className="quiz-kicker">MVP de testes</span>
-          <h1>Crie questões a partir dos seus PDFs</h1>
-          <p>Envie até 5 arquivos. Se algum PDF for foto de prova, escaneado ou tiver questões em imagem, marque esse arquivo para leitura visual.</p>
-        </div>
+        <FicharioPanelHeader
+          kicker="NOVO SIMULADO"
+          title="Adicione materiais para o simulado"
+          description="Use até 5 PDFs. Arquivos escaneados podem ser configurados para leitura por imagem."
+        />
 
-        <div
-          className="quiz-dropzone"
-          role="button"
-          tabIndex={0}
-          onClick={() => inputRef.current?.click()}
-          onKeyDown={(event) => {
-            if (event.key === 'Enter' || event.key === ' ') inputRef.current?.click();
-          }}
-        >
-          <div className="upload-icon">PDF</div>
-          <strong>Selecionar PDFs</strong>
-          <span>Até 5 arquivos. Depois você informa quais precisam de leitura por imagem.</span>
-          <input
-            ref={inputRef}
-            className="upload-input"
-            type="file"
-            accept=".pdf,application/pdf"
-            multiple
-            onChange={(event) => processFiles(event.target.files)}
-          />
-        </div>
+        <FicharioPdfDropzone
+          variant="quiz"
+          inputRef={inputRef}
+          title="Selecionar PDFs"
+          description="Até 5 arquivos. Depois você informa quais precisam de leitura por imagem."
+          ariaLabel="Selecionar até cinco arquivos PDF para o simulado"
+          disabled={isProcessing}
+          onFilesSelected={processFiles}
+        />
 
         {isProcessing && (
           <div className="quiz-status">
@@ -275,9 +263,11 @@ export default function QuizUpload({
         )}
 
         <div className="quiz-upload-actions">
-          <button className="btn btn-secondary" onClick={() => inputRef.current?.click()} disabled={isProcessing}>
-            Trocar arquivos
-          </button>
+          {files.length > 0 && (
+            <button className="btn btn-secondary" onClick={() => inputRef.current?.click()} disabled={isProcessing}>
+              Trocar arquivos
+            </button>
+          )}
           <button className="btn btn-primary btn-lg" onClick={handleSubmit} disabled={files.length === 0 || isProcessing}>
             Gerar teste
           </button>

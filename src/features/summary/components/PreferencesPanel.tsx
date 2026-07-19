@@ -70,7 +70,7 @@ export default function PreferencesPanel({
   onBack,
 }) {
   const [readHandwriting, setReadHandwriting] = useState(true);
-  const [handwritingMode, setHandwritingMode] = useState('manual');
+  const [handwritingMode, setHandwritingMode] = useState('auto');
   const [manualPagesInput, setManualPagesInput] = useState('');
   const [method, setMethod] = useState('free');
   const [formats, setFormats] = useState(['bullets', 'tables']);
@@ -132,22 +132,43 @@ export default function PreferencesPanel({
   return (
     <div className="prefs-section">
       <div className="prefs-content prefs-compact">
+        <header className="prefs-page-header">
+          <span>RESUMO / CONFIGURAÇÃO</span>
+          <h1>Como este material deve ser organizado?</h1>
+          <p>Defina apenas o necessário. Você poderá revisar a estrutura antes de gerar o resumo.</p>
+          <div className="prefs-progress" aria-label="Etapa 1 de 2: configurar resumo">
+            <strong>01</strong><span>Configurar</span><i /><strong>02</strong><span>Revisar plano</span>
+          </div>
+        </header>
+
         <div className="prefs-file-summary">
           <div>
-            <div className="prefs-kicker">Arquivo</div>
+            <div className="prefs-kicker">{fileData.files?.length > 1 ? 'Materiais selecionados' : 'Material selecionado'}</div>
             <div className="prefs-file-title">{fileData.name}</div>
             <div className="prefs-file-meta">
               {fileData.numPages} {fileData.numPages === 1 ? 'página' : 'páginas'} · {formatFileSize(fileData.size)}
             </div>
+            {fileData.files?.length > 1 && (
+              <div className="prefs-file-sources">
+                {fileData.files.map((file) => (
+                  <span key={`${file.name}-${file.size}`} title={file.name}>
+                    {file.name} · p. {file.startPage}–{file.endPage}
+                  </span>
+                ))}
+              </div>
+            )}
           </div>
-          <button className="btn btn-ghost" onClick={onBack}>Trocar arquivo</button>
+          <button className="btn btn-ghost" onClick={onBack}>Trocar materiais</button>
         </div>
 
         <section className="prefs-panel">
           <div className="prefs-panel-header">
-            <div>
-              <h2>Leitura visual</h2>
-              <p>Defina quais páginas serão enviadas ao GLM para capturar caneta, setas, imagens e fluxogramas.</p>
+            <div className="prefs-panel-heading">
+              <span>01</span>
+              <div>
+                <h2>Leitura visual</h2>
+                <p>Capture anotações, imagens, tabelas e fluxogramas que não aparecem no texto do PDF.</p>
+              </div>
             </div>
             <label className="prefs-switch">
               <input
@@ -155,7 +176,7 @@ export default function PreferencesPanel({
                 checked={readHandwriting}
                 onChange={(event) => setReadHandwriting(event.target.checked)}
               />
-              <span>Ativa</span>
+              <span>{readHandwriting ? 'Ativa' : 'Desativada'}</span>
             </label>
           </div>
 
@@ -166,6 +187,7 @@ export default function PreferencesPanel({
                   type="button"
                   className={handwritingMode === 'auto' ? 'selected' : ''}
                   onClick={() => setHandwritingMode('auto')}
+                  aria-pressed={handwritingMode === 'auto'}
                   data-tooltip="Usa o detector local para enviar ao GLM só páginas com provável imagem, tabela complexa ou manuscrito."
                 >
                   Automático
@@ -174,6 +196,7 @@ export default function PreferencesPanel({
                   type="button"
                   className={handwritingMode === 'manual' ? 'selected' : ''}
                   onClick={() => setHandwritingMode('manual')}
+                  aria-pressed={handwritingMode === 'manual'}
                   data-tooltip="Você informa as páginas onde escreveu. Melhor equilíbrio entre custo, tempo e qualidade."
                 >
                   Informar páginas
@@ -182,11 +205,18 @@ export default function PreferencesPanel({
                   type="button"
                   className={handwritingMode === 'all' ? 'selected' : ''}
                   onClick={() => setHandwritingMode('all')}
+                  aria-pressed={handwritingMode === 'all'}
                   data-tooltip="Envia todas as páginas ao GLM. Mais fiel, mas mais lento e caro."
                 >
                   Todas
                 </button>
               </div>
+
+              <p className="prefs-selection-help">
+                {handwritingMode === 'auto' && 'Recomendado: identifica localmente as páginas que provavelmente precisam de leitura por imagem.'}
+                {handwritingMode === 'manual' && 'Você indica as páginas com elementos visuais. É a opção mais precisa para materiais já conhecidos.'}
+                {handwritingMode === 'all' && 'Lê todas as páginas por imagem. Use apenas quando o documento for majoritariamente escaneado.'}
+              </p>
 
               {handwritingMode === 'manual' && (
                 <div className="prefs-field-row">
@@ -216,9 +246,12 @@ export default function PreferencesPanel({
         </section>
 
         <section className="prefs-panel prefs-grid-panel">
-          <div>
-            <h2>Resumo</h2>
-            <p>Escolha a estrutura e os blocos que devem aparecer no resultado.</p>
+          <div className="prefs-panel-heading">
+            <span>02</span>
+            <div>
+              <h2>Estrutura do resumo</h2>
+              <p>Escolha o método principal e os formatos que ajudam na sua revisão.</p>
+            </div>
           </div>
 
           <div className="prefs-field-row">
@@ -242,6 +275,7 @@ export default function PreferencesPanel({
                 className={`prefs-chip ${formats.includes(format.id) ? 'selected' : ''}`}
                 onClick={() => toggleFormat(format.id)}
                 type="button"
+                aria-pressed={formats.includes(format.id)}
                 data-tooltip={format.desc}
               >
                 {format.label}
@@ -251,9 +285,12 @@ export default function PreferencesPanel({
         </section>
 
         <section className="prefs-panel">
-          <div>
-            <h2>Profundidade</h2>
-            <p>Controle o nível de detalhe do resumo final.</p>
+          <div className="prefs-panel-heading">
+            <span>03</span>
+            <div>
+              <h2>Profundidade</h2>
+              <p>Controle quanto contexto e explicação entram no resultado final.</p>
+            </div>
           </div>
           <div className="prefs-segmented">
             {DETAIL_LEVELS.map((item) => (
@@ -262,9 +299,10 @@ export default function PreferencesPanel({
                 type="button"
                 className={detailLevel === item.id ? 'selected' : ''}
                 onClick={() => setDetailLevel(item.id)}
-                data-tooltip={item.desc}
+                aria-pressed={detailLevel === item.id}
               >
-                {item.label}
+                <strong>{item.label}</strong>
+                <small>{item.desc}</small>
               </button>
             ))}
           </div>
@@ -286,6 +324,7 @@ export default function PreferencesPanel({
         )}
 
         <div className="prefs-actions compact">
+          <span>Próxima etapa: revisar a estrutura sugerida</span>
           <button className="btn btn-secondary" onClick={onBack}>
             Voltar
           </button>

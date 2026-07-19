@@ -6,7 +6,22 @@ import { buildAuthHeaders } from '../../auth/services/authClient';
  * does not send an Authorization header.
  */
 
-const API_URL = '/api/deepseek/chat/completions';
+const API_URL = '/api/ai/chat/completions';
+const DEEPSEEK_VALIDATION_URL = '/api/deepseek/chat/completions';
+
+export type AiRole =
+  | 'evidence'
+  | 'spec'
+  | 'spec-audit'
+  | 'spec-audit-simple'
+  | 'spec-audit-critical'
+  | 'spec-correction'
+  | 'summary'
+  | 'summary-audit'
+  | 'summary-audit-simple'
+  | 'summary-audit-critical'
+  | 'summary-repair'
+  | 'flashcards';
 
 type MessageContent =
   | { type: 'text'; text: string }
@@ -19,6 +34,9 @@ type GenerateSummaryParams = {
   pageImages?: string[];
   onChunk: (chunk: string) => void;
   signal?: AbortSignal;
+  role?: AiRole;
+  maxTokens?: number;
+  temperature?: number;
 };
 
 /**
@@ -70,7 +88,17 @@ function buildMultimodalContent(textContent: string, pageImages?: string[]) {
  * @param {AbortSignal} [params.signal] - Optional abort signal
  * @returns {Promise<string>} - The full generated text
  */
-export async function generateSummary({ apiKey, pdfText, systemPrompt, pageImages, onChunk, signal }: GenerateSummaryParams) {
+export async function generateSummary({
+  apiKey,
+  pdfText,
+  systemPrompt,
+  pageImages,
+  onChunk,
+  signal,
+  role = 'summary',
+  maxTokens,
+  temperature = 0.1,
+}: GenerateSummaryParams) {
   const headers = {
     'Content-Type': 'application/json',
     ...await buildAuthHeaders(),
@@ -91,7 +119,7 @@ export async function generateSummary({ apiKey, pdfText, systemPrompt, pageImage
     headers,
     credentials: 'same-origin',
     body: JSON.stringify({
-      model: 'deepseek-chat',
+      role,
       messages: [
         {
           role: 'system',
@@ -103,8 +131,8 @@ export async function generateSummary({ apiKey, pdfText, systemPrompt, pageImage
         },
       ],
       stream: true,
-      max_tokens: 8192,
-      temperature: 0.3,
+      ...(maxTokens ? { max_tokens: maxTokens } : {}),
+      temperature,
     }),
     signal,
   });
@@ -133,6 +161,7 @@ export async function generateSummary({ apiKey, pdfText, systemPrompt, pageImage
   const decoder = new TextDecoder();
   let fullText = '';
   let buffer = '';
+  let finishReason = '';
 
   while (true) {
     const { done, value } = await reader.read();
@@ -154,6 +183,7 @@ export async function generateSummary({ apiKey, pdfText, systemPrompt, pageImage
       try {
         const parsed = JSON.parse(data);
         const content = parsed.choices?.[0]?.delta?.content;
+        finishReason = parsed.choices?.[0]?.finish_reason || finishReason;
         if (content) {
           fullText += content;
           onChunk(content);
@@ -162,6 +192,17 @@ export async function generateSummary({ apiKey, pdfText, systemPrompt, pageImage
         // Skip malformed chunks
       }
     }
+  }
+
+  const routedProvider = response.headers.get('X-AI-Provider') || 'desconhecido';
+  const routedModel = response.headers.get('X-AI-Model') || 'desconhecido';
+  const routedRole = response.headers.get('X-AI-Role') || role;
+
+  if (finishReason === 'length') {
+    throw new Error(
+      `A etapa ${routedRole} atingiu o limite de tokens no modelo ${routedModel} `
+      + `(${routedProvider}) e ficou incompleta. O sistema não publicará conteúdo truncado.`
+    );
   }
 
   return fullText;
@@ -182,12 +223,12 @@ export async function validateApiKey(apiKey) {
       headers['X-Provider-Authorization'] = `Bearer ${apiKey}`;
     }
 
-    const response = await fetch(API_URL, {
+    const response = await fetch(DEEPSEEK_VALIDATION_URL, {
       method: 'POST',
       headers,
       credentials: 'same-origin',
       body: JSON.stringify({
-        model: 'deepseek-chat',
+        model: 'deepseek-v4-flash',
         messages: [{ role: 'user', content: 'Olá' }],
         max_tokens: 5,
       }),

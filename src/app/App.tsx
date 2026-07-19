@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
+import { ArrowLeft, Camera, CircleX, FileText, RefreshCw } from 'lucide-react';
 import type { AuthSession } from '../features/auth/domain/auth';
 import Header from '../shared/components/Header';
 import ApiKeyModal from '../features/auth/components/ApiKeyModal';
@@ -10,20 +11,24 @@ import PreferencesPanel from '../features/summary/components/PreferencesPanel';
 import SpecEditor from '../features/summary/components/SpecEditor';
 import ProcessingView from '../features/summary/components/ProcessingView';
 import ResultView from '../features/summary/components/ResultView';
-import QuizUpload from '../features/quiz/components/QuizUpload';
 import QuizView from '../features/quiz/components/QuizView';
 import QuizProcessingTimeline from '../features/quiz/components/QuizProcessingTimeline';
 import { generateSummary } from '../features/summary/services/deepseekApi';
 import { buildQuizFromCorpus } from '../features/quiz/services/quizApi';
 import { transcribePDFWithGLM } from '../features/summary/services/zhipuApi';
 import { renderPDFPagesToImages } from '../features/pdf/services/pdfExtractor';
+import { revokePdfCorpusUrls } from '../features/pdf/services/pdfCorpus';
+import { generateFlashcardsFromSummary } from '../features/flashcards/services/flashcardGenerator';
+import { assessCorpusComplexity } from '../features/ai/services/aiOrchestrator';
 import { setAuthTokenGetter } from '../features/auth/services/authClient';
 import { 
   buildSpecPrompt, 
   buildSummaryPrompt, 
   buildSummaryUserMessage, 
   buildAuditPrompt, 
-  buildAuditUserMessage 
+  buildAuditUserMessage,
+  buildSummaryRepairPrompt,
+  buildSummaryRepairUserMessage,
 } from '../features/summary/prompts/templates';
 import {
   buildEvidenceMapPrompt,
@@ -34,7 +39,15 @@ import {
   buildSpecAuditUserMessage,
   buildSpecFromEvidenceUserMessage,
 } from '../features/summary/prompts/evidence';
-import { createMockFileData, mockSummary } from '../shared/mocks/e2eMock';
+import {
+  createMockFileData,
+  mockEvidenceMap,
+  mockFlashcardDrafts,
+  mockSpec,
+  mockSpecAudit,
+  mockSummary,
+  mockSummaryLog,
+} from '../shared/mocks/e2eMock';
 
 function isLocalBrowserHost() {
   if (typeof window === 'undefined') return false;
@@ -44,6 +57,9 @@ function isLocalBrowserHost() {
 const isE2EMockMode = import.meta.env.DEV
   && import.meta.env.VITE_E2E_MOCK === 'true'
   && isLocalBrowserHost();
+const canUseLocalTestFlow = import.meta.env.DEV && isLocalBrowserHost();
+
+const waitForLocalTest = (duration: number) => new Promise((resolve) => window.setTimeout(resolve, duration));
 
 /**
  * App States:
@@ -301,6 +317,48 @@ function needsQuizVisionPreparation(file) {
   return Boolean(visualRequested && !file?.visualStatus);
 }
 
+function getSummaryAuditStatus(auditText) {
+  if (!auditText) return 'PENDENTE';
+  const match = auditText.match(/\*\*Status final:\*\*\s*(?:\[)?([^\]\n]+)/i);
+  if (!match) return 'PENDENTE';
+  return match[1].trim().toUpperCase();
+}
+
+async function renderSummaryCorpusPages(fileInfo, globalPages, options) {
+  const { onProgress, ...renderOptions } = options;
+  const globalPageSet = new Set(globalPages);
+  const sources = fileInfo.files?.length
+    ? fileInfo.files
+    : [{ file: fileInfo.file, sourceIndex: 0 }];
+  const images = {};
+  let completedPages = 0;
+
+  for (const source of sources) {
+    const mappings = fileInfo.pageMetadata.filter((page) => (
+      globalPageSet.has(page.pageNum)
+      && (fileInfo.files?.length ? page.sourceIndex === source.sourceIndex : true)
+    ));
+    if (!mappings.length) continue;
+
+    const localPages = mappings.map((page) => page.sourcePageNum ?? page.pageNum);
+    const result = await renderPDFPagesToImages(source.file, {
+      ...renderOptions,
+      pageNumbersToRender: localPages,
+      onProgress: ({ current }) => {
+        onProgress?.({ current: completedPages + current, total: globalPages.length });
+      },
+    });
+
+    mappings.forEach((page) => {
+      const localPage = page.sourcePageNum ?? page.pageNum;
+      if (result.images[localPage]) images[page.pageNum] = result.images[localPage];
+    });
+    completedPages += mappings.length;
+  }
+
+  return { images };
+}
+
 export default function App() {
   const [session, setSession] = useState<AuthSession | null>(null);
   const [isLoaded, setIsLoaded] = useState(false);
@@ -321,6 +379,7 @@ export default function App() {
       setIsLoaded(true);
     });
   }, []);
+
   // Core state - DeepSeek generates text; GLM transcribes visual/handwritten pages.
   // Local keys are optional overrides. Server-side env keys are preferred.
   const [appState, setAppState] = useState('upload');
@@ -333,6 +392,8 @@ export default function App() {
   const [serverConfig, setServerConfig] = useState({
     deepseekConfigured: false,
     zhipuConfigured: false,
+    auditorConfigured: false,
+    auditorProvider: null as string | null,
     loaded: false,
   });
   const [accessDenied, setAccessDenied] = useState(false);
@@ -348,6 +409,7 @@ export default function App() {
   const [spec, setSpec] = useState('');
   const [specAudit, setSpecAudit] = useState('');
   const [specCorrectionCount, setSpecCorrectionCount] = useState(0);
+  const [specGenerationStage, setSpecGenerationStage] = useState('evidence');
   const [riskDecisions, setRiskDecisions] = useState({});
   const [summary, setSummary] = useState('');
   const [summaryLog, setSummaryLog] = useState('');
@@ -360,12 +422,19 @@ export default function App() {
   const [quizOptions, setQuizOptions] = useState({ questionMode: 'generated_only', questionCount: 15 });
   const [quizProcessingMessage, setQuizProcessingMessage] = useState('');
   const [quizProcessingStage, setQuizProcessingStage] = useState('files');
+  const [flashcardDrafts, setFlashcardDrafts] = useState([]);
+  const [homeInitialMode, setHomeInitialMode] = useState<'summary' | 'quiz' | 'flashcards'>('summary');
+  const [hasWorkspaceActivity, setHasWorkspaceActivity] = useState(false);
+  const [workspaceResetKey, setWorkspaceResetKey] = useState(0);
+  const [showHomeConfirmation, setShowHomeConfirmation] = useState(false);
   const [error, setError] = useState('');
+  const [isLocalTestFlow, setIsLocalTestFlow] = useState(false);
 
   // Abort controller
   const abortControllerRef = useRef(null);
   const hasDeepseekAccess = Boolean(deepseekKey || serverConfig.deepseekConfigured);
   const hasZhipuAccess = Boolean(zhipuKey || serverConfig.zhipuConfigured);
+  const hasIndependentAuditor = Boolean(serverConfig.auditorConfigured);
   const highRiskItems = useMemo(
     () => extractHighRiskEvidenceItems(evidenceMap || fileData?.evidenceMap || ''),
     [evidenceMap, fileData]
@@ -380,6 +449,8 @@ export default function App() {
       setServerConfig({
         deepseekConfigured: true,
         zhipuConfigured: true,
+        auditorConfigured: true,
+        auditorProvider: 'mock',
         loaded: true,
       });
       setAccessDenied(false);
@@ -423,6 +494,8 @@ export default function App() {
         setServerConfig({
           deepseekConfigured: Boolean(config.deepseekConfigured),
           zhipuConfigured: Boolean(config.zhipuConfigured),
+          auditorConfigured: Boolean(config.auditorConfigured),
+          auditorProvider: config.auditorProvider || null,
           loaded: true,
         });
       })
@@ -470,6 +543,8 @@ export default function App() {
     setServerConfig({
       deepseekConfigured: Boolean(config.deepseekConfigured),
       zhipuConfigured: Boolean(config.zhipuConfigured),
+      auditorConfigured: Boolean(config.auditorConfigured),
+      auditorProvider: config.auditorProvider || null,
       loaded: true,
     });
   }, [getToken]);
@@ -486,7 +561,7 @@ export default function App() {
   // --- Upload complete → go to preferences ---
   const handleUploadComplete = useCallback((data) => {
     if (abortControllerRef.current) abortControllerRef.current.abort();
-    if (fileData?.pdfUrl) URL.revokeObjectURL(fileData.pdfUrl);
+    revokePdfCorpusUrls(fileData);
     setFileData(data);
     setPreferences(null);
     setContextBase('');
@@ -504,6 +579,11 @@ export default function App() {
     setAppState('preferences');
   }, [fileData]);
 
+  const handleStartLocalTest = useCallback(() => {
+    setIsLocalTestFlow(true);
+    handleUploadComplete(createMockFileData());
+  }, [handleUploadComplete]);
+
   const handleStartQuiz = useCallback(() => {
     if (abortControllerRef.current) abortControllerRef.current.abort();
     setQuizFiles([]);
@@ -512,14 +592,46 @@ export default function App() {
     setQuizOptions({ questionMode: 'generated_only', questionCount: 15 });
     setQuizProcessingMessage('');
     setQuizProcessingStage('files');
-    setQuizProcessingStage('files');
     setError('');
-    setAppState('quiz-upload');
+    setIsLocalTestFlow(false);
+    setHomeInitialMode('quiz');
+    setAppState('upload');
   }, []);
+
+  const handleCreateFlashcardsFromSummary = useCallback(async () => {
+    if (isLocalTestFlow) {
+      setFlashcardDrafts(mockFlashcardDrafts);
+      setHomeInitialMode('flashcards');
+      setAppState('upload');
+      return;
+    }
+
+    if (!hasDeepseekAccess) {
+      setShowApiKeyModal(true);
+      throw new Error('Configure o DeepSeek para gerar flashcards automaticamente.');
+    }
+
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+    const drafts = await generateFlashcardsFromSummary({
+      apiKey: deepseekKey,
+      summary,
+      signal: controller.signal,
+    });
+    if (!drafts.length) throw new Error('O resumo não gerou cartões válidos.');
+    setFlashcardDrafts(drafts);
+    setHomeInitialMode('flashcards');
+    setAppState('upload');
+  }, [deepseekKey, hasDeepseekAccess, isLocalTestFlow, summary]);
 
   const handleGenerateQuiz = useCallback(async (files, options: any = {}) => {
     if (!hasDeepseekAccess) {
       setShowApiKeyModal(true);
+      return;
+    }
+    if (!hasIndependentAuditor) {
+      setError('Configure OPENROUTER_API_KEY, KIMI_API_KEY ou OPENAI_API_KEY no servidor para habilitar a auditoria independente do simulado.');
+      setAppState('error');
       return;
     }
 
@@ -645,7 +757,7 @@ export default function App() {
       setError(err.message || 'Erro ao gerar o teste.');
       setAppState('error');
     }
-  }, [deepseekKey, hasDeepseekAccess, hasZhipuAccess, quizOptions.questionCount, quizOptions.questionMode, zhipuKey]);
+  }, [deepseekKey, hasDeepseekAccess, hasIndependentAuditor, hasZhipuAccess, quizOptions.questionCount, quizOptions.questionMode, zhipuKey]);
 
   // --- Preferences selected → generate SPEC ---
   const handleGenerateQuizVariant = useCallback((variant, payload: any = {}) => {
@@ -666,27 +778,71 @@ export default function App() {
     setQuizAnalysis(null);
     setQuizProcessingMessage('');
     setQuizProcessingStage('files');
+    setFlashcardDrafts([]);
     setError('');
-    setAppState('quiz-upload');
+    setHomeInitialMode('quiz');
+    setAppState('upload');
   }, []);
+
+  const runLocalSpecFlow = useCallback(async (prefs) => {
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+    const mockFile = fileData || createMockFileData();
+
+    setPreferences(prefs);
+    setContextBase(mockFile.contextBase);
+    setEvidenceMap('');
+    setSpec('');
+    setSpecAudit('');
+    setSpecCorrectionCount(0);
+    setRiskDecisions({});
+    setError('');
+    setSpecGenerationStage('evidence');
+    setAppState('generating-spec');
+
+    await waitForLocalTest(650);
+    if (controller.signal.aborted) return;
+    setEvidenceMap(mockEvidenceMap);
+    setSpecGenerationStage('structure');
+
+    await waitForLocalTest(650);
+    if (controller.signal.aborted) return;
+    setSpec(mockSpec);
+    setSpecGenerationStage('audit');
+
+    await waitForLocalTest(750);
+    if (controller.signal.aborted) return;
+    setSpecAudit(mockSpecAudit);
+    setAppState('edit-spec');
+  }, [fileData]);
 
   const handlePreferencesComplete = useCallback((prefs) => {
     setPreferences(prefs);
+
+    if (isLocalTestFlow) {
+      runLocalSpecFlow(prefs);
+      return;
+    }
 
     if (!hasDeepseekAccess || !hasZhipuAccess) {
       setShowApiKeyModal(true);
       return;
     }
+    if (!hasIndependentAuditor) {
+      setError('Configure OPENROUTER_API_KEY, KIMI_API_KEY ou OPENAI_API_KEY no servidor para habilitar a auditoria independente do resumo.');
+      setAppState('error');
+      return;
+    }
 
     generateSpec(fileData, prefs);
-  }, [hasDeepseekAccess, hasZhipuAccess, fileData]);
+  }, [hasDeepseekAccess, hasIndependentAuditor, hasZhipuAccess, fileData, isLocalTestFlow, runLocalSpecFlow]);
 
   // --- Generate SPEC (Step 1) ---
   const generateSpec = useCallback(async (data, prefs) => {
     const fileInfo = data || fileData;
     const prefsToUse = prefs || preferences;
 
-    if (!fileInfo || !hasDeepseekAccess || !hasZhipuAccess || !prefsToUse) return;
+    if (!fileInfo || !hasDeepseekAccess || !hasIndependentAuditor || !hasZhipuAccess || !prefsToUse) return;
 
     let pageImages = fileInfo.pageImages || {};
     let transcribedTextMap = fileInfo.transcribedTextMap || {};
@@ -722,11 +878,10 @@ export default function App() {
         setRenderingProgress(0);
         try {
           const highFidelity = handwritingMode === 'all';
-          const { images } = await renderPDFPagesToImages(fileInfo.file, {
+          const { images } = await renderSummaryCorpusPages(fileInfo, pagesToRender, {
             scale: highFidelity ? 2.0 : 1.6,
             quality: highFidelity ? 0.92 : 0.86,
             format: highFidelity ? 'image/png' : 'image/jpeg',
-            pageNumbersToRender: pagesToRender,
             onProgress: ({ current, total }) => {
               setRenderingProgress(Math.round((current / total) * 100));
             },
@@ -781,6 +936,9 @@ export default function App() {
     // 4. Build context-base: keep PDF text and append GLM visual transcription.
     const generatedContext = fileInfo.pageMetadata.map(page => {
       const pageNum = page.pageNum;
+      const sourceLabel = page.sourceName
+        ? `${page.sourceName} · página ${page.sourcePageNum}`
+        : `PDF · página ${pageNum}`;
       const pdfText = page.text?.trim()
         ? page.text.trim()
         : '[Sem texto selecionável extraído pelo PDF.js]';
@@ -789,7 +947,7 @@ export default function App() {
         : '';
 
       return [
-        `--- Página ${pageNum} ---`,
+        `--- Página global ${pageNum} · ${sourceLabel} ---`,
         `## Texto selecionável extraído do PDF`,
         pdfText,
         needsVisionFlow ? `## Transcrição visual GLM-4V da página renderizada` : '',
@@ -797,8 +955,22 @@ export default function App() {
       ].filter(Boolean).join('\n');
     }).join('\n\n');
 
+    const orchestration = assessCorpusComplexity({
+      text: generatedContext,
+      numPages: fileInfo.numPages,
+      fileCount: fileInfo.files?.length || 1,
+      hasVision: needsVisionFlow && hasVisionPages,
+    });
+
+    if (orchestration.tier === 'invalid') {
+      setError(orchestration.reasons[0]);
+      setAppState('error');
+      return;
+    }
+
     setContextBase(generatedContext);
     fileInfo.contextBase = generatedContext;
+    fileInfo.aiComplexity = orchestration;
     setFileData(fileInfo);
 
     // 5. Build an evidence map, then generate and audit the SPEC.
@@ -808,6 +980,7 @@ export default function App() {
     setSpecCorrectionCount(0);
     setRiskDecisions({});
     setEvidenceMap('');
+    setSpecGenerationStage('evidence');
     setError('');
 
     abortControllerRef.current = new AbortController();
@@ -821,6 +994,7 @@ export default function App() {
       let generatedEvidenceMap = '';
       await generateSummary({
         apiKey: deepseekKey,
+        role: 'evidence',
         pdfText: buildEvidenceMapUserMessage(generatedContext),
         systemPrompt: evidencePrompt,
         onChunk: (chunk) => {
@@ -833,9 +1007,11 @@ export default function App() {
       fileInfo.evidenceMap = generatedEvidenceMap;
       setFileData(fileInfo);
 
+      setSpecGenerationStage('structure');
       let generatedSpec = '';
       await generateSummary({
         apiKey: deepseekKey,
+        role: 'spec',
         pdfText: `${outputPreferenceInstructions}\n\n---\n\n${buildSpecFromEvidenceUserMessage(generatedEvidenceMap)}`,
         systemPrompt: specPrompt,
         onChunk: (chunk) => {
@@ -849,10 +1025,17 @@ export default function App() {
       let currentAudit = '';
       let correctionCount = 0;
 
-      const auditSpec = async (specToAudit) => {
+      const routineSpecAuditRole = orchestration.tier === 'simple'
+        ? 'spec-audit-simple'
+        : 'spec-audit';
+      const auditSpec = async (
+        specToAudit,
+        role: 'spec-audit-simple' | 'spec-audit' | 'spec-audit-critical' = routineSpecAuditRole
+      ) => {
         let audit = '';
         await generateSummary({
           apiKey: deepseekKey,
+          role,
           pdfText: buildSpecAuditUserMessage(generatedEvidenceMap, specToAudit),
           systemPrompt: specAuditPrompt,
           onChunk: (chunk) => {
@@ -863,13 +1046,16 @@ export default function App() {
         return audit;
       };
 
+      setSpecGenerationStage('audit');
       currentAudit = await auditSpec(currentSpec);
 
       while (correctionCount < 2 && getSpecAuditStatus(currentAudit) !== 'APROVADA') {
         correctionCount++;
+        setSpecGenerationStage('correction');
         let correctedSpec = '';
         await generateSummary({
           apiKey: deepseekKey,
+          role: 'spec-correction',
           pdfText: buildSpecCorrectionUserMessage(generatedEvidenceMap, currentSpec, currentAudit),
           systemPrompt: specCorrectionPrompt,
           onChunk: (chunk) => {
@@ -880,7 +1066,12 @@ export default function App() {
 
         currentSpec = correctedSpec;
         setSpec(currentSpec);
+        setSpecGenerationStage('audit');
         currentAudit = await auditSpec(currentSpec);
+      }
+
+      if (orchestration.tier === 'high' && getSpecAuditStatus(currentAudit) !== 'APROVADA') {
+        currentAudit = await auditSpec(currentSpec, 'spec-audit-critical');
       }
 
       setSpec(currentSpec);
@@ -896,7 +1087,7 @@ export default function App() {
       setError(err.message || 'Erro ao gerar o plano do resumo.');
       setAppState('error');
     }
-  }, [fileData, deepseekKey, zhipuKey, hasDeepseekAccess, hasZhipuAccess, preferences]);
+  }, [fileData, deepseekKey, zhipuKey, hasDeepseekAccess, hasIndependentAuditor, hasZhipuAccess, preferences]);
 
   // --- Summary Generation Core (handles initial & reinforcement coverage runs) ---
   const runSummaryGeneration = useCallback(async (reinforcementString) => {
@@ -904,6 +1095,11 @@ export default function App() {
 
     if (!hasDeepseekAccess) {
       setShowApiKeyModal(true);
+      return;
+    }
+    if (!hasIndependentAuditor) {
+      setError('Configure OPENROUTER_API_KEY, KIMI_API_KEY ou OPENAI_API_KEY no servidor para habilitar a auditoria independente do resumo.');
+      setAppState('error');
       return;
     }
 
@@ -920,15 +1116,25 @@ export default function App() {
 
     const summaryPrompt = buildSummaryPrompt();
     const rawContext = contextBase || fileData.contextBase || fileData.text;
+    const orchestration = fileData.aiComplexity || assessCorpusComplexity({
+      text: rawContext,
+      numPages: fileData.numPages,
+      fileCount: fileData.files?.length || 1,
+      hasVision: Boolean(fileData.transcribedTextMap && Object.keys(fileData.transcribedTextMap).length),
+    });
     const evidenceContext = evidenceMap || fileData.evidenceMap || '';
     const riskReviewNotes = buildRiskReviewNotes(highRiskItems, riskDecisions);
     const outputPreferenceInstructions = buildOutputPreferenceInstructions(preferences);
-    const textContext = evidenceContext
-      ? `## MAPA DE EVIDENCIAS VALIDADO\n\n${evidenceContext}\n\n---\n\n## CONTEXTO BRUTO DO PDF\n\n${rawContext}`
+    // The generator reads the original corpus once. Routine audits and repairs use
+    // the page-indexed evidence map to avoid paying to resend the whole PDF on every
+    // iteration. A critical audit still receives the raw corpus.
+    const generationContext = rawContext;
+    const compactAuditContext = evidenceContext
+      ? `## MAPA DE EVIDENCIAS POR PAGINA\n\n${evidenceContext}`
       : rawContext;
     
     // Inject reinforcement instructions at the beginning of user message if present
-    let userMessage = `${outputPreferenceInstructions}\n\n---\n\n${buildSummaryUserMessage(textContext, spec)}`;
+    let userMessage = `${outputPreferenceInstructions}\n\n---\n\n${buildSummaryUserMessage(generationContext, spec)}`;
     if (riskReviewNotes) {
       userMessage = `${riskReviewNotes}\n\n---\n\n${userMessage}`;
     }
@@ -948,6 +1154,7 @@ export default function App() {
 
       await generateSummary({
         apiKey: deepseekKey,
+        role: 'summary',
         pdfText: userMessage,
         systemPrompt: summaryPrompt,
         onChunk: onSummaryChunk,
@@ -959,30 +1166,111 @@ export default function App() {
       setSummary(finalSummary);
       setSummaryLog(splitGenerated.log);
 
-      // 2. Perform Automatic Audit
+      // 2. Perform an independent audit and repair rejected drafts before publication.
       setIsAuditing(true);
-      
       const auditPrompt = buildAuditPrompt();
-      const auditUserMessage = buildAuditUserMessage(textContext, spec, finalSummary);
-      let auditReport = '';
+      const repairPrompt = buildSummaryRepairPrompt();
+      const auditHistory = [];
+      let operationalLog = splitGenerated.log;
+      const routineSummaryAuditRole = orchestration.tier === 'simple'
+        ? 'summary-audit-simple'
+        : 'summary-audit';
 
-      const onAuditChunk = (chunk) => {
-        auditReport += chunk;
-        const combinedLog = [splitGenerated.log, auditReport.trim()].filter(Boolean).join('\n\n---\n\n');
-        setSummaryLog(combinedLog);
+      const auditSummary = async (
+        summaryToAudit,
+        attemptNumber,
+        role: 'summary-audit-simple' | 'summary-audit' | 'summary-audit-critical' = routineSummaryAuditRole
+      ) => {
+        let report = '';
+        const auditContext = role === 'summary-audit-critical'
+          ? generationContext
+          : compactAuditContext;
+        await generateSummary({
+          apiKey: deepseekKey,
+          role,
+          pdfText: buildAuditUserMessage(auditContext, spec, summaryToAudit),
+          systemPrompt: auditPrompt,
+          onChunk: (chunk) => {
+            report += chunk;
+            const completedAudits = auditHistory.map((item, index) => (
+              `## Auditoria ${index + 1}\n\n${item}`
+            ));
+            const currentAudit = `## Auditoria ${attemptNumber}\n\n${report.trim()}`;
+            setSummaryLog([operationalLog, ...completedAudits, currentAudit]
+              .filter(Boolean)
+              .join('\n\n---\n\n'));
+          },
+          signal: abortControllerRef.current.signal,
+        });
+        auditHistory.push(report);
+        return report;
       };
 
-      await generateSummary({
-        apiKey: deepseekKey,
-        pdfText: auditUserMessage,
-        systemPrompt: auditPrompt,
-        onChunk: onAuditChunk,
-        signal: abortControllerRef.current.signal,
-      });
+      let missing = getMissingPages(finalSummary, fileData.numPages);
+      let auditReport = await auditSummary(finalSummary, 1);
+      let repairCount = 0;
 
-      // 3. Scan for page coverage programmatically
-      const missing = getMissingPages(finalSummary, fileData.numPages);
+      while (
+        repairCount < 2
+        && (getSummaryAuditStatus(auditReport) !== 'APROVADO' || missing.length > 0)
+      ) {
+        repairCount += 1;
+        let repairedOutput = '';
+
+        await generateSummary({
+          apiKey: deepseekKey,
+          role: 'summary-repair',
+          pdfText: buildSummaryRepairUserMessage(
+            compactAuditContext,
+            spec,
+            finalSummary,
+            auditReport,
+            missing
+          ),
+          systemPrompt: repairPrompt,
+          onChunk: (chunk) => {
+            repairedOutput += chunk;
+            const repaired = splitOperationalSections(repairedOutput);
+            setSummary(repaired.summary);
+          },
+          signal: abortControllerRef.current.signal,
+        });
+
+        const repaired = splitOperationalSections(repairedOutput);
+        finalSummary = repaired.summary;
+        operationalLog = [operationalLog, repaired.log].filter(Boolean).join('\n\n---\n\n');
+        setSummary(finalSummary);
+        missing = getMissingPages(finalSummary, fileData.numPages);
+        auditReport = await auditSummary(finalSummary, repairCount + 1);
+      }
+
       setMissingPages(missing);
+
+      if (
+        orchestration.tier === 'high'
+        && getSummaryAuditStatus(auditReport) !== 'APROVADO'
+        && missing.length === 0
+      ) {
+        auditReport = await auditSummary(
+          finalSummary,
+          auditHistory.length + 1,
+          'summary-audit-critical'
+        );
+      }
+
+      const finalAuditStatus = getSummaryAuditStatus(auditReport);
+      const finalLog = [
+        operationalLog,
+        ...auditHistory.map((item, index) => `## Auditoria ${index + 1}\n\n${item}`),
+      ].filter(Boolean).join('\n\n---\n\n');
+      setSummaryLog(finalLog);
+
+      if (finalAuditStatus !== 'APROVADO' || missing.length > 0) {
+        throw new Error(
+          `O resumo não atingiu o nível mínimo de qualidade após ${repairCount} correções automáticas. `
+          + `Status: ${finalAuditStatus}${missing.length ? `. Páginas sem cobertura: ${missing.join(', ')}` : ''}.`
+        );
+      }
 
       setIsAuditing(false);
       setAppState('result');
@@ -992,14 +1280,37 @@ export default function App() {
       setError(err.message || 'Erro ao gerar o resumo.');
       setAppState('error');
     }
-  }, [deepseekKey, hasDeepseekAccess, fileData, spec, preferences, contextBase, evidenceMap, highRiskItems, riskDecisions, unresolvedRiskCount]);
+  }, [deepseekKey, hasDeepseekAccess, hasIndependentAuditor, fileData, spec, preferences, contextBase, evidenceMap, highRiskItems, riskDecisions, unresolvedRiskCount]);
 
   // --- Initial Summary Generation ---
   const handleGenerateFromSpec = useCallback(() => {
     setCoverageReinforcementInstruction('');
     setMissingPages([]);
+
+    if (isLocalTestFlow) {
+      const controller = new AbortController();
+      abortControllerRef.current = controller;
+      setSummary('');
+      setSummaryLog('');
+      setIsAuditing(false);
+      setAppState('processing');
+
+      void (async () => {
+        await waitForLocalTest(900);
+        if (controller.signal.aborted) return;
+        setIsAuditing(true);
+        await waitForLocalTest(900);
+        if (controller.signal.aborted) return;
+        setSummary(mockSummary);
+        setSummaryLog(mockSummaryLog);
+        setIsAuditing(false);
+        setAppState('result');
+      })();
+      return;
+    }
+
     runSummaryGeneration('');
-  }, [runSummaryGeneration]);
+  }, [isLocalTestFlow, runSummaryGeneration]);
 
   // --- Reinforcement Regeneration ---
   const handleRegenerateWithCoverage = useCallback(() => {
@@ -1014,8 +1325,12 @@ Você DEVE obrigatoriamente incluir e detalhar todas as informações, critério
 
   // --- Regenerate SPEC ---
   const handleRegenerateSpec = useCallback(() => {
+    if (isLocalTestFlow) {
+      runLocalSpecFlow(preferences);
+      return;
+    }
     generateSpec(fileData, preferences);
-  }, [fileData, preferences, generateSpec]);
+  }, [fileData, preferences, generateSpec, isLocalTestFlow, runLocalSpecFlow]);
 
   const handleRiskDecisionChange = useCallback((itemId, decision) => {
     setRiskDecisions((prev) => ({
@@ -1040,7 +1355,7 @@ Você DEVE obrigatoriamente incluir e detalhar todas as informações, critério
   // --- Reset ---
   const handleNewSummary = useCallback(() => {
     if (abortControllerRef.current) abortControllerRef.current.abort();
-    if (fileData?.pdfUrl) URL.revokeObjectURL(fileData.pdfUrl);
+    revokePdfCorpusUrls(fileData);
     setFileData(null);
     setPreferences(null);
     setContextBase('');
@@ -1060,14 +1375,41 @@ Você DEVE obrigatoriamente incluir e detalhar todas as informações, critério
     setQuizOptions({ questionMode: 'generated_only', questionCount: 15 });
     setQuizProcessingMessage('');
     setQuizProcessingStage('files');
+    setFlashcardDrafts([]);
+    setHomeInitialMode('summary');
+    setHasWorkspaceActivity(false);
+    setWorkspaceResetKey((current) => current + 1);
     setError('');
+    setIsLocalTestFlow(false);
     setAppState('upload');
   }, [fileData]);
+
+  const handleHeaderHome = useCallback(() => {
+    if (appState !== 'upload' || hasWorkspaceActivity) {
+      setShowHomeConfirmation(true);
+    }
+  }, [appState, hasWorkspaceActivity]);
+
+  const confirmReturnHome = useCallback(() => {
+    setShowHomeConfirmation(false);
+    handleNewSummary();
+  }, [handleNewSummary]);
+
+  useEffect(() => {
+    if (!showHomeConfirmation) return undefined;
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setShowHomeConfirmation(false);
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [showHomeConfirmation]);
 
   // --- Back to upload ---
   const handleBackToUpload = useCallback(() => {
     if (abortControllerRef.current) abortControllerRef.current.abort();
-    if (fileData?.pdfUrl) URL.revokeObjectURL(fileData.pdfUrl);
+    revokePdfCorpusUrls(fileData);
     setFileData(null);
     setPreferences(null);
     setContextBase('');
@@ -1084,7 +1426,9 @@ Você DEVE obrigatoriamente incluir e detalhar todas as informações, critério
     setQuizQuestions([]);
     setQuizAnalysis(null);
     setQuizOptions({ questionMode: 'generated_only', questionCount: 15 });
+    setHomeInitialMode('summary');
     setQuizProcessingMessage('');
+    setIsLocalTestFlow(false);
     setAppState('upload');
   }, [fileData]);
 
@@ -1106,6 +1450,7 @@ Você DEVE obrigatoriamente incluir e detalhar todas as informações, critério
     return (
       <div className="app-loading-screen">
         <div className="app-loading-shell">
+          <span className="app-loading-kicker">ACESSO / PREPARAÇÃO</span>
           <div className="app-loading-mark">
             <span className="header-logo-wordmark">Resumex</span>
           </div>
@@ -1116,6 +1461,7 @@ Você DEVE obrigatoriamente incluir e detalhar todas as informações, critério
           <div className="app-loading-bar" aria-hidden="true">
             <span />
           </div>
+          <span className="app-loading-note">Isso leva apenas alguns instantes.</span>
         </div>
       </div>
     );
@@ -1145,34 +1491,36 @@ Você DEVE obrigatoriamente incluir e detalhar todas as informações, critério
   }
 
   return (
-    <div className="app-container">
+    <div className={`app-container fichario-app ${appState === 'upload' ? 'home-fichario' : ''} ${appState === 'preferences' ? 'preferences-fichario' : ''} ${['rendering-pdf', 'transcribing-pdf', 'generating-spec', 'edit-spec', 'processing'].includes(appState) ? 'analysis-fichario' : ''} ${appState === 'result' ? 'result-fichario' : ''}`}>
       <div className="app-content">
         <Header
-          deepseekKey={deepseekKey}
-          zhipuKey={zhipuKey}
-          deepseekAvailable={hasDeepseekAccess}
-          zhipuAvailable={hasZhipuAccess}
-          onOpenApiKeyModal={() => setShowApiKeyModal(true)}
-          userActions={session?.user ? <AccountButton user={session.user} /> : null}
+          onHome={handleHeaderHome}
+          userActions={session?.user ? (
+            <AccountButton
+              user={session.user}
+              onStudyCenter={handleNewSummary}
+            />
+          ) : null}
         />
 
         {appState === 'upload' && (
           <UploadZone
+            key={workspaceResetKey}
             onUploadComplete={handleUploadComplete}
-            onStartQuiz={handleStartQuiz}
-          />
-        )}
-
-        {appState === 'quiz-upload' && (
-          <QuizUpload
-            deepseekKey={deepseekKey}
-            deepseekAvailable={hasDeepseekAccess}
-            zhipuKey={zhipuKey}
-            zhipuAvailable={hasZhipuAccess}
-            initialFiles={quizFiles}
-            onOpenApiKeyModal={() => setShowApiKeyModal(true)}
-            onGenerate={handleGenerateQuiz}
-            onBack={handleNewSummary}
+            onStartLocalTest={canUseLocalTestFlow ? handleStartLocalTest : undefined}
+            initialMode={homeInitialMode}
+            onModeChange={setHomeInitialMode}
+            onActivityChange={setHasWorkspaceActivity}
+            flashcardConfig={{ initialDrafts: flashcardDrafts }}
+            quizConfig={{
+              deepseekKey,
+              deepseekAvailable: hasDeepseekAccess,
+              zhipuKey,
+              zhipuAvailable: hasZhipuAccess,
+              initialFiles: quizFiles,
+              onOpenApiKeyModal: () => setShowApiKeyModal(true),
+              onGenerate: handleGenerateQuiz,
+            }}
           />
         )}
 
@@ -1191,38 +1539,41 @@ Você DEVE obrigatoriamente incluir e detalhar todas as informações, critério
 
         {appState === 'rendering-pdf' && fileData && (
           <div className="processing-section">
+            <span className="processing-kicker">PREPARANDO MATERIAL / ETAPA 01</span>
             <div className="processing-animation">
               <div className="processing-ring" style={{ borderTopColor: 'var(--accent-cyan)' }} />
               <div className="processing-ring" style={{ borderRightColor: 'var(--accent-mint)', animationDirection: 'reverse' }} />
-              <div className="processing-core">📸</div>
+              <div className="processing-core"><Camera aria-hidden="true" /></div>
             </div>
-            <div className="processing-text">
+            <div className="processing-text" role="status" aria-live="polite">
               <h3>Preparando imagens das páginas</h3>
-              <p>Renderizando as páginas selecionadas para leitura visual...</p>
+              <p>Convertendo apenas as páginas selecionadas para que anotações, tabelas e esquemas possam ser lidos.</p>
             </div>
-            <div className="upload-progress-bar">
+            <div className="upload-progress-bar" role="progressbar" aria-label="Preparação das páginas" aria-valuemin={0} aria-valuemax={100} aria-valuenow={renderingProgress}>
               <div className="upload-progress-fill" style={{ width: `${renderingProgress}%` }} />
             </div>
             <span style={{ fontSize: 'var(--font-size-sm)', color: 'var(--text-secondary)' }}>
               {renderingProgress}% concluído
             </span>
+            <p className="processing-note">Mantenha esta aba aberta. A próxima etapa começará automaticamente.</p>
           </div>
         )}
 
         {appState === 'transcribing-pdf' && fileData && (
           <div className="processing-section">
+            <span className="processing-kicker">LEITURA VISUAL / ETAPA 02</span>
             <div className="processing-animation">
               <div className="processing-ring" style={{ borderTopColor: 'var(--accent-amber)' }} />
               <div className="processing-ring" style={{ borderRightColor: 'var(--accent-purple)', animationDirection: 'reverse' }} />
-              <div className="processing-core">📝</div>
+              <div className="processing-core"><FileText aria-hidden="true" /></div>
             </div>
-            <div className="processing-text">
-              <h3>Transcrevendo com GLM-4V</h3>
-              <p>O modelo de visão está lendo as páginas selecionadas para capturar caneta, setas e esquemas...</p>
+            <div className="processing-text" role="status" aria-live="polite">
+              <h3>Transcrevendo elementos visuais</h3>
+              <p>O modelo está capturando caneta, setas, imagens e esquemas sem substituir o texto original do PDF.</p>
             </div>
             {transcriptionProgress.total > 0 && (
               <>
-                <div className="upload-progress-bar">
+                <div className="upload-progress-bar" role="progressbar" aria-label="Leitura visual das páginas" aria-valuemin={0} aria-valuemax={transcriptionProgress.total} aria-valuenow={transcriptionProgress.current}>
                   <div 
                     className="upload-progress-fill" 
                     style={{ 
@@ -1236,6 +1587,7 @@ Você DEVE obrigatoriamente incluir e detalhar todas as informações, critério
                 </span>
               </>
             )}
+            <p className="processing-note">Cada página concluída é incorporada ao material antes da criação do plano.</p>
           </div>
         )}
 
@@ -1248,6 +1600,7 @@ Você DEVE obrigatoriamente incluir e detalhar todas as informações, critério
             highRiskItems={highRiskItems}
             riskDecisions={riskDecisions}
             isGenerating={appState === 'generating-spec'}
+            generationStage={specGenerationStage}
             onSpecChange={setSpec}
             onRiskDecisionChange={handleRiskDecisionChange}
             onGenerate={handleGenerateFromSpec}
@@ -1270,12 +1623,14 @@ Você DEVE obrigatoriamente incluir e detalhar todas as informações, critério
 
         {appState === 'result' && (
           <ResultView
+            fileData={fileData}
             pdfUrl={fileData?.pdfUrl}
             summary={summary}
             summaryLog={summaryLog}
             missingPages={missingPages}
             onRegenerateWithCoverage={handleRegenerateWithCoverage}
             onNewSummary={handleNewSummary}
+            onCreateFlashcards={handleCreateFlashcardsFromSummary}
           />
         )}
 
@@ -1292,22 +1647,57 @@ Você DEVE obrigatoriamente incluir e detalhar todas as informações, critério
 
         {appState === 'error' && (
           <div className="error-section">
-            <div className="error-icon">😵</div>
+            <div className="error-icon"><CircleX aria-hidden="true" /></div>
             <h2 className="error-title">Ops, algo deu errado</h2>
             <p className="error-message">{error}</p>
             <div style={{ display: 'flex', gap: 'var(--space-md)', flexWrap: 'wrap', justifyContent: 'center' }}>
               <button className="btn btn-secondary" onClick={handleNewSummary}>
-                ← Recomeçar
+                <ArrowLeft size={18} aria-hidden="true" />
+                Recomeçar
               </button>
               {fileData && preferences && (
                 <button className="btn btn-primary" onClick={handleGenerateFromSpec}>
-                  🔄 Tentar Novamente
+                  <RefreshCw size={18} aria-hidden="true" />
+                  Tentar Novamente
                 </button>
               )}
             </div>
           </div>
         )}
       </div>
+
+      {showHomeConfirmation && (
+        <div
+          className="home-confirmation-overlay"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) setShowHomeConfirmation(false);
+          }}
+        >
+          <section
+            className="home-confirmation-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="home-confirmation-title"
+          >
+            <span className="home-confirmation-kicker">VOLTAR À HOME?</span>
+            <h2 id="home-confirmation-title">Interromper o que você está fazendo?</h2>
+            <p>Arquivos selecionados e alterações ainda não concluídas serão descartados.</p>
+            <div className="home-confirmation-actions">
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => setShowHomeConfirmation(false)}
+                autoFocus
+              >
+                Continuar aqui
+              </button>
+              <button type="button" className="btn btn-primary" onClick={confirmReturnHome}>
+                Voltar para a home
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
 
       {showApiKeyModal && (
         <ApiKeyModal

@@ -8,6 +8,7 @@
     "dev": "vite",
     "dev:api": "node server/index.js",
     "typecheck": "tsc --noEmit",
+    "check:flashcards": "node scripts/check-flashcard-scheduler.mjs",
     "build": "npm run typecheck && vite build",
     "preview": "vite preview",
     "server": "node server/index.js",
@@ -20,12 +21,14 @@
     "@supabase/supabase-js": "^2.110.7",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
+    "lucide-react": "^1.25.0",
     "pdfjs-dist": "^4.9.155",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-markdown": "^9.0.3",
     "rehype-raw": "^7.0.0",
-    "remark-gfm": "^4.0.0"
+    "remark-gfm": "^4.0.0",
+    "ts-fsrs": "5.4.1"
   },
   "devDependencies": {
     "@types/react": "^19.0.0",

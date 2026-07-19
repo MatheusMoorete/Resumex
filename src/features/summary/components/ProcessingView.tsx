@@ -1,54 +1,25 @@
-import { useState, useEffect } from 'react';
+import { Check, Circle } from 'lucide-react';
+import NotebookLoadingAnimation from '../../loading/components/NotebookLoadingAnimation';
 
 const STEPS = [
-  { label: 'Analisando estrutura do PDF', duration: 1500 },
-  { label: 'Extraindo conceitos-chave', duration: 3000 },
-  { label: 'Gerando resumo com IA', duration: 0 }, 
-  { label: 'Realizando auditoria automática', duration: 0 }
+  'Gerando o resumo a partir do plano aprovado',
+  'Auditando fidelidade, valores e referências',
 ];
 
 export default function ProcessingView({ isAuditing = false }) {
-  const [activeStep, setActiveStep] = useState(0);
-
-  useEffect(() => {
-    const timers = [];
-
-    let elapsed = 0;
-    // Set timers for the first two automatic steps
-    for (let i = 0; i < 2; i++) {
-      elapsed += STEPS[i].duration;
-      timers.push(
-        setTimeout(() => setActiveStep(i + 1), elapsed)
-      );
-    }
-
-    return () => timers.forEach(clearTimeout);
-  }, []);
-
-  // Update active step based on external audit state
-  useEffect(() => {
-    if (isAuditing) {
-      setActiveStep(3); // Go to final audit step
-    } else if (activeStep === 3 && !isAuditing) {
-      setActiveStep(2); // Go back to summary generation if needed
-    }
-  }, [isAuditing, activeStep]);
+  const activeStep = isAuditing ? 1 : 0;
 
   return (
-    <div className="processing-section">
-      <div className="processing-animation">
-        <div className="processing-ring" style={{ borderTopColor: isAuditing ? 'var(--accent-mint)' : 'var(--accent-cyan)' }} />
-        <div className="processing-ring" style={{ borderRightColor: isAuditing ? 'var(--accent-cyan)' : 'var(--accent-mint)', animationDirection: 'reverse' }} />
-        <div className="processing-ring" />
-        <div className="processing-core">{isAuditing ? '🛡️' : '🧬'}</div>
-      </div>
+    <div className="processing-section summary-processing-section">
+      <span className="processing-kicker">RESUMO / ETAPA FINAL</span>
+      <NotebookLoadingAnimation duration={isAuditing ? 1 : .78} />
 
-      <div className="processing-text">
-        <h3>{isAuditing ? 'Auditando Resumo' : 'Processando seu material'}</h3>
+      <div className="processing-text" role="status" aria-live="polite">
+        <h3>{isAuditing ? 'Conferindo o resumo' : 'Escrevendo seu resumo'}</h3>
         <p>
           {isAuditing 
-            ? 'Nossa IA auditora está revisando a fidelidade dos dados e as citações...' 
-            : 'A IA está analisando o PDF e gerando o resumo estruturado...'
+            ? 'Um segundo modelo está revisando fidelidade, valores e referências antes da entrega.'
+            : 'O conteúdo está sendo organizado conforme o plano que você acabou de aprovar.'
           }
         </p>
       </div>
@@ -65,13 +36,16 @@ export default function ProcessingView({ isAuditing = false }) {
               className={`processing-step ${stepStatus}`}
             >
               <span className="processing-step-icon">
-                {stepStatus === 'done' ? '✓' : stepStatus === 'active' ? '●' : '○'}
+                {stepStatus === 'done'
+                  ? <Check aria-hidden="true" />
+                  : <Circle fill={stepStatus === 'active' ? 'currentColor' : 'none'} aria-hidden="true" />}
               </span>
-              <span>{step.label}</span>
+              <span>{step}</span>
             </div>
           );
         })}
       </div>
+      <p className="processing-note">Mantenha esta aba aberta. O resultado aparecerá automaticamente quando estiver pronto.</p>
     </div>
   );
 }

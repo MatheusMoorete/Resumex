@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 import App from './app/App';
 import './app/App.css';
 import { authService } from './features/auth/services/authService';
+import LandingPage from './features/landing/LandingPage';
 
 function MissingAuthConfig() {
   return (
@@ -23,8 +24,10 @@ function MissingAuthConfig() {
   );
 }
 
+const isLandingPage = (window.location.pathname.replace(/\/$/, '') || '/') === '/';
+
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    {authService.isConfigured ? <App /> : <MissingAuthConfig />}
+    {isLandingPage ? <LandingPage /> : authService.isConfigured ? <App /> : <MissingAuthConfig />}
   </StrictMode>,
 );

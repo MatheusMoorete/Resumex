@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { formatFileSize } from '../../pdf/services/pdfExtractor';
+import { resolveCorpusPage } from '../../pdf/services/pdfCorpus';
 import MarkdownPreview from '../../../shared/components/MarkdownPreview';
 import PdfSplitViewer from '../../pdf/components/PdfSplitViewer';
+import pdfIcon from '../../../assets/pdf_icon.png';
 
 function getAuditStatus(specAudit) {
   if (!specAudit) return 'Pendente';
@@ -24,6 +26,12 @@ function isRiskDecisionResolved(decision) {
   return true;
 }
 
+const GENERATION_STAGES = [
+  { id: 'evidence', label: 'Mapeando evidências', description: 'Relacionando os conceitos às páginas de origem e preservando o contexto do material.' },
+  { id: 'structure', label: 'Montando a estrutura', description: 'Aplicando o método, os formatos e a profundidade escolhidos por você.' },
+  { id: 'audit', label: 'Auditando e corrigindo', description: 'Verificando inconsistências com um segundo modelo antes de liberar o plano.' },
+];
+
 export default function SpecEditor({
   fileData,
   spec,
@@ -32,6 +40,7 @@ export default function SpecEditor({
   highRiskItems = [],
   riskDecisions = {},
   isGenerating,
+  generationStage = 'evidence',
   onSpecChange,
   onRiskDecisionChange,
   onGenerate,
@@ -45,6 +54,12 @@ export default function SpecEditor({
   const auditIssues = getAuditIssues(specAudit);
   const unresolvedRiskCount = highRiskItems.filter((item) => !isRiskDecisionResolved(riskDecisions[item.id])).length;
   const completedRiskCount = highRiskItems.length - unresolvedRiskCount;
+  const normalizedGenerationStage = generationStage === 'correction' ? 'audit' : generationStage;
+  const generationStageIndex = Math.max(0, GENERATION_STAGES.findIndex((item) => item.id === normalizedGenerationStage));
+  const currentGenerationStage = GENERATION_STAGES[generationStageIndex];
+  const resolvedPdfReview = pdfReviewItem
+    ? resolveCorpusPage(fileData, pdfReviewItem.page)
+    : null;
 
   useEffect(() => {
     if (isGenerating) setViewMode('preview');
@@ -68,11 +83,12 @@ export default function SpecEditor({
     <div className="spec-section">
       <div className="spec-file-bar">
         <div className="uploaded-file" style={{ flex: 1 }}>
-          <div className="uploaded-file-icon">PDF</div>
+          <img className="uploaded-file-icon" src={pdfIcon} alt="" aria-hidden="true" />
           <div className="uploaded-file-info">
             <div className="uploaded-file-name">{fileData.name}</div>
             <div className="uploaded-file-meta">
-              {fileData.numPages} {fileData.numPages === 1 ? 'pagina' : 'paginas'} · {formatFileSize(fileData.size)}
+              {fileData.files?.length > 1 ? `${fileData.files.length} arquivos · ` : ''}
+              {fileData.numPages} {fileData.numPages === 1 ? 'página' : 'páginas'} · {formatFileSize(fileData.size)}
             </div>
           </div>
         </div>
@@ -80,11 +96,12 @@ export default function SpecEditor({
 
       <div className="spec-header-bar">
         <div className="spec-header-left">
+          <span className="spec-header-kicker">{isGenerating ? 'RESUMO / ANÁLISE' : 'RESUMO / PLANO AUDITADO'}</span>
           <h2>{isGenerating ? 'Analisando material' : 'Plano do resumo'}</h2>
           <p>
             {isGenerating
-              ? 'Criando mapa de evidencias, corrigindo a SPEC e auditando o plano.'
-              : 'Revise o plano final. A auditoria fica separada e nao sera enviada como parte da SPEC.'}
+              ? 'Criando mapa de evidências, estruturando e auditando o plano.'
+              : 'Confira a estrutura antes de gerar. A auditoria permanece separada do conteúdo do resumo.'}
           </p>
         </div>
 
@@ -106,7 +123,7 @@ export default function SpecEditor({
               className={`result-tab ${viewMode === 'risk' ? 'active' : ''}`}
               onClick={() => setViewMode('risk')}
             >
-              Revisao critica
+              Revisão crítica
             </button>
             <button
               className={`result-tab ${viewMode === 'edit' ? 'active' : ''}`}
@@ -125,7 +142,7 @@ export default function SpecEditor({
             <strong>{auditStatus}</strong>
           </div>
           <div>
-            <span className="spec-quality-label">Correcoes automaticas</span>
+            <span className="spec-quality-label">Correções automáticas</span>
             <strong>{specCorrectionCount}</strong>
           </div>
           <div>
@@ -133,7 +150,7 @@ export default function SpecEditor({
             <strong>{auditIssues.length}</strong>
           </div>
           <div>
-            <span className="spec-quality-label">Riscos sem decisao</span>
+            <span className="spec-quality-label">Riscos sem decisão</span>
             <strong>{unresolvedRiskCount}</strong>
           </div>
         </div>
@@ -146,7 +163,7 @@ export default function SpecEditor({
           onClick={() => setViewMode('risk')}
         >
           <span>
-            A IA corrigiu automaticamente o plano, mas ainda restaram {unresolvedRiskCount} {unresolvedRiskCount === 1 ? 'ponto' : 'pontos'} de baixa confianca.
+            A IA corrigiu automaticamente o plano, mas ainda restaram {unresolvedRiskCount} {unresolvedRiskCount === 1 ? 'ponto' : 'pontos'} de baixa confiança.
           </span>
           <strong>Revisar agora</strong>
         </button>
@@ -159,23 +176,23 @@ export default function SpecEditor({
               <div className="spec-generation-layout">
                 <aside className="spec-generation-status">
                   <span className="spec-generation-kicker">Preparando plano</span>
-                  <h3>Transformando a leitura em uma SPEC auditavel</h3>
+                  <h3>Transformando a leitura em um plano confiável</h3>
                   <p>
-                    Estamos organizando as evidencias por pagina, aplicando suas preferencias e checando inconsistencias antes da revisao final.
+                    Cada etapa preserva a ligação com o PDF antes de entregar a estrutura para sua revisão.
                   </p>
-                  <div className="spec-generation-steps">
-                    <div className="spec-generation-step done">
-                      <span />
-                      <strong>Material analisado</strong>
-                    </div>
-                    <div className={`spec-generation-step ${spec ? 'done' : 'active'}`}>
-                      <span />
-                      <strong>Estrutura do plano</strong>
-                    </div>
-                    <div className={`spec-generation-step ${spec ? 'active' : ''}`}>
-                      <span />
-                      <strong>Auditoria e correcao</strong>
-                    </div>
+                  <div className="spec-generation-current" role="status" aria-live="polite">
+                    <span>AGORA</span>
+                    <strong>{generationStage === 'correction' ? 'Corrigindo inconsistências' : currentGenerationStage.label}</strong>
+                    <p>{generationStage === 'correction' ? 'A auditoria encontrou ajustes e o plano está sendo corrigido antes de uma nova verificação.' : currentGenerationStage.description}</p>
+                    <i aria-hidden="true"><b /><b /><b /></i>
+                  </div>
+                  <div className="spec-generation-steps" aria-label={`Etapa ${generationStageIndex + 1} de ${GENERATION_STAGES.length}`}>
+                    {GENERATION_STAGES.map((item, index) => (
+                      <div className={`spec-generation-step ${index < generationStageIndex ? 'done' : ''} ${index === generationStageIndex ? 'active' : ''}`} key={item.id}>
+                        <span>{index < generationStageIndex ? '✓' : index + 1}</span>
+                        <strong>{item.label}</strong>
+                      </div>
+                    ))}
                   </div>
                   <div className="spec-generation-facts">
                     <div>
@@ -189,6 +206,10 @@ export default function SpecEditor({
                   </div>
                 </aside>
                 <div className="spec-generation-preview">
+                  <div className="spec-generation-preview-header">
+                    <span>PLANO EM CONSTRUÇÃO</span>
+                    <strong>{spec ? 'A estrutura aparece enquanto é preparada' : 'Aguardando o mapa de evidências'}</strong>
+                  </div>
                   {spec ? (
                     <MarkdownPreview content={spec} />
                   ) : (
@@ -216,7 +237,7 @@ export default function SpecEditor({
             {isGenerating && (
               <div className="spec-generating-indicator">
                 <span className="spec-generating-dot" />
-                <span>Gerando plano auditado. Esta etapa pode levar alguns segundos apos a leitura das paginas.</span>
+                <span>Etapa {generationStageIndex + 1} de {GENERATION_STAGES.length} · {generationStage === 'correction' ? 'Corrigindo inconsistências encontradas' : currentGenerationStage.label}</span>
               </div>
             )}
           </div>
@@ -293,7 +314,7 @@ export default function SpecEditor({
                       </div>
                       <div className="spec-risk-text">{item.text}</div>
                       <div className="spec-risk-reason">{item.reason}</div>
-                      {fileData.pdfUrl && (
+                      {resolveCorpusPage(fileData, item.page).pdfUrl && (
                         <button
                           type="button"
                           className="spec-risk-pdf-button"
@@ -366,8 +387,8 @@ export default function SpecEditor({
           <div className="pdf-review-modal">
             <div className="pdf-review-header">
               <div>
-                <span>Referencia original</span>
-                <h3>Pagina {pdfReviewItem.page}</h3>
+                <span>Referência original · página global {pdfReviewItem.page}</span>
+                <h3>{resolvedPdfReview?.sourceName} · página {resolvedPdfReview?.pageNum}</h3>
               </div>
               <button
                 type="button"
@@ -378,8 +399,8 @@ export default function SpecEditor({
               </button>
             </div>
             <PdfSplitViewer
-              pdfUrl={fileData.pdfUrl}
-              activePage={pdfReviewItem.page}
+              pdfUrl={resolvedPdfReview?.pdfUrl}
+              activePage={resolvedPdfReview?.pageNum}
               sourceText={`${pdfReviewItem.text}\n${pdfReviewItem.context || ''}`}
             />
           </div>
