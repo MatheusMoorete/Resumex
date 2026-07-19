@@ -1,9 +1,9 @@
 import 'dotenv/config';
 import express from 'express';
-import { clerkClient, clerkMiddleware, getAuth } from '@clerk/express';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { createAuthProvider } from './auth/authProvider.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -12,8 +12,7 @@ const rootDir = path.resolve(__dirname, '..');
 const app = express();
 const port = Number(process.env.PORT || 8787);
 const isProduction = process.env.NODE_ENV === 'production';
-const clerkSecretKey = process.env.CLERK_SECRET_KEY || '';
-const clerkPublishableKey = process.env.CLERK_PUBLISHABLE_KEY || process.env.VITE_CLERK_PUBLISHABLE_KEY || '';
+const authProvider = createAuthProvider();
 const allowedEmails = (process.env.ALLOWED_EMAILS || '')
   .split(',')
   .map((email) => email.trim().toLowerCase())
@@ -26,13 +25,8 @@ const e2eMockAuthEnabled = process.env.E2E_MOCK_AUTH === 'true';
 const e2eNotionMockEnabled = process.env.E2E_NOTION_MOCK === 'true';
 const e2eNotionMockPath = path.join(rootDir, 'tmp', 'notion-export-mock.json');
 
-if (isProduction && !clerkSecretKey) {
-  console.error('Missing CLERK_SECRET_KEY. Refusing to start production without Clerk authentication.');
-  process.exit(1);
-}
-
-if (isProduction && !clerkPublishableKey) {
-  console.error('Missing CLERK_PUBLISHABLE_KEY. Refusing to start production without Clerk authentication.');
+if (isProduction && !authProvider.isConfigured) {
+  console.error(`Authentication provider "${authProvider.name}" is not configured. Refusing to start production.`);
   process.exit(1);
 }
 
@@ -45,7 +39,6 @@ app.set('trust proxy', 1);
 app.disable('x-powered-by');
 
 app.use(express.json({ limit: '35mb' }));
-app.use(clerkMiddleware({ publishableKey: clerkPublishableKey, secretKey: clerkSecretKey }));
 
 app.use((error, _req, res, next) => {
   if (error instanceof SyntaxError && 'body' in error) {
@@ -117,6 +110,16 @@ function rateLimit({ windowMs, max, name }) {
   };
 }
 
+function getBearerToken(req) {
+  const authorization = String(req.get('authorization') || '');
+  return authorization.startsWith('Bearer ') ? authorization.slice(7).trim() : '';
+}
+
+async function getAuthenticatedUser(req) {
+  const token = getBearerToken(req);
+  return authProvider.verifyToken(token);
+}
+
 async function requireAuth(req, res, next) {
   try {
     if (e2eMockAuthEnabled && canUseLocalE2EMock(req)) {
@@ -124,17 +127,15 @@ async function requireAuth(req, res, next) {
       return;
     }
 
-    const { userId } = getAuth(req);
-
-    if (!userId) {
+    const user = await getAuthenticatedUser(req);
+    if (!user) {
       res.status(401).json({ error: { message: 'Authentication required.' } });
       return;
     }
 
     if (allowedEmails.length > 0) {
-      const user = await clerkClient.users.getUser(userId);
-      const emails = user.emailAddresses.map((email) => email.emailAddress.toLowerCase());
-      const allowed = emails.some((email) => allowedEmails.includes(email));
+      const email = String(user.email || '').toLowerCase();
+      const allowed = allowedEmails.includes(email);
 
       if (!allowed) {
         res.status(403).json({ error: { message: 'Email is not allowed.' } });
@@ -169,12 +170,16 @@ app.get('/api/health', (_req, res) => {
   res.json({ ok: true });
 });
 
-app.get('/api/auth/status', (req, res) => {
-  const { userId } = getAuth(req);
-  res.json({
-    authRequired: true,
-    authenticated: Boolean(userId),
-  });
+app.get('/api/auth/status', async (req, res, next) => {
+  try {
+    const user = await getAuthenticatedUser(req);
+    res.json({
+      authRequired: true,
+      authenticated: Boolean(user),
+    });
+  } catch (error) {
+    next(error);
+  }
 });
 
 app.post('/api/auth/login', (_req, res) => {
@@ -182,7 +187,7 @@ app.post('/api/auth/login', (_req, res) => {
 });
 
 app.post('/api/auth/logout', (_req, res) => {
-  res.status(410).json({ error: { message: 'Logout is handled by Clerk.' } });
+  res.status(410).json({ error: { message: 'Logout is handled by the authentication provider.' } });
 });
 
 app.get('/api/config', requireAuth, (_req, res) => {
@@ -617,7 +622,7 @@ app.get(/.*/, (_req, res) => {
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   app.listen(port, () => {
     if (allowedEmails.length === 0) {
-      console.warn('ALLOWED_EMAILS is not configured. Any authenticated Clerk user can use the app.');
+      console.warn('ALLOWED_EMAILS is not configured. Any authenticated user can use the app.');
     }
     console.log(`ResumeX server listening on http://localhost:${port}`);
   });

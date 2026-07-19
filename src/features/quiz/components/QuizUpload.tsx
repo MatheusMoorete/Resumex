@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { extractTextFromPDF, formatFileSize } from '../services/pdfExtractor';
+import { extractTextFromPDF, formatFileSize } from '../../pdf/services/pdfExtractor';
 
 const MAX_FILES = 5;
 const MIN_TEXT_CHARS_FOR_TEXT_MODE = 300;
@@ -41,8 +41,8 @@ export default function QuizUpload({
     setFiles(initialFiles || []);
   }, [initialFiles]);
 
-  const processFiles = useCallback(async (fileList) => {
-    const selectedFiles = Array.from(fileList || []);
+  const processFiles = useCallback(async (fileList: FileList | File[]) => {
+    const selectedFiles = Array.from(fileList || []) as File[];
     if (selectedFiles.length === 0) return;
 
     if (selectedFiles.length > MAX_FILES) {

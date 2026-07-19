@@ -1,4 +1,4 @@
-import { buildAuthHeaders } from './authClient';
+import { buildAuthHeaders } from '../../auth/services/authClient';
 
 const API_URL = '/api/deepseek/chat/completions';
 const MAX_CONTEXT_CHARS = 70000;

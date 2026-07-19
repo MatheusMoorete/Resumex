@@ -1,4 +1,4 @@
-import { buildAuthHeaders } from './authClient';
+import { buildAuthHeaders } from '../../auth/services/authClient';
 
 /**
  * DeepSeek API service with streaming and multimodal (vision) support.
@@ -8,20 +8,33 @@ import { buildAuthHeaders } from './authClient';
 
 const API_URL = '/api/deepseek/chat/completions';
 
+type MessageContent =
+  | { type: 'text'; text: string }
+  | { type: 'image_url'; image_url: { url: string } };
+
+type GenerateSummaryParams = {
+  apiKey?: string;
+  pdfText: string;
+  systemPrompt: string;
+  pageImages?: string[];
+  onChunk: (chunk: string) => void;
+  signal?: AbortSignal;
+};
+
 /**
  * Builds a multimodal user message with page images and optional text.
  * @param {string} textContent - Text instruction or extracted text
  * @param {string[]} [pageImages] - Array of base64 data URLs for each page
  * @returns {Array} - Content array for the message
  */
-function buildMultimodalContent(textContent, pageImages) {
+function buildMultimodalContent(textContent: string, pageImages?: string[]) {
   if (!pageImages || pageImages.length === 0) {
     // Text-only mode
     return textContent;
   }
 
   // Multimodal mode: interleave text labels with page images
-  const content = [
+  const content: MessageContent[] = [
     {
       type: 'text',
       text: textContent,
@@ -57,7 +70,7 @@ function buildMultimodalContent(textContent, pageImages) {
  * @param {AbortSignal} [params.signal] - Optional abort signal
  * @returns {Promise<string>} - The full generated text
  */
-export async function generateSummary({ apiKey, pdfText, systemPrompt, pageImages, onChunk, signal }) {
+export async function generateSummary({ apiKey, pdfText, systemPrompt, pageImages, onChunk, signal }: GenerateSummaryParams) {
   const headers = {
     'Content-Type': 'application/json',
     ...await buildAuthHeaders(),

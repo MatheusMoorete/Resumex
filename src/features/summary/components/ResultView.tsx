@@ -1,8 +1,8 @@
 import { useState, useCallback } from 'react';
-import MarkdownPreview from './MarkdownPreview';
-import PdfSplitViewer from './PdfSplitViewer';
-import { copyToClipboard, stripPageReferences } from '../utils/clipboard';
-import { exportSummaryToNotion } from '../services/notionApi';
+import MarkdownPreview from '../../../shared/components/MarkdownPreview';
+import PdfSplitViewer from '../../pdf/components/PdfSplitViewer';
+import { copyToClipboard, stripPageReferences } from '../../../shared/utils/clipboard';
+import { exportSummaryToNotion } from '../../notion/services/notionApi';
 
 export default function ResultView({ pdfUrl, summary, summaryLog = '', missingPages = [], onRegenerateWithCoverage, onNewSummary }) {
   const [viewMode, setViewMode] = useState(pdfUrl ? 'split' : 'preview'); // 'preview' | 'raw' | 'split'

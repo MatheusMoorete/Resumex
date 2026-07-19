@@ -1,5 +1,20 @@
 import * as pdfjsLib from 'pdfjs-dist';
 
+type PageMetadata = {
+  pageNum: number;
+  text: string;
+  needsVision: boolean;
+};
+
+type RenderPdfOptions = {
+  scale?: number;
+  quality?: number;
+  format?: string;
+  maxPages?: number;
+  pageNumbersToRender?: number[] | null;
+  onProgress?: (progress: { current: number; total: number }) => void;
+};
+
 // Use CDN worker for simplicity in the MVP
 pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.mjs`;
 
@@ -7,7 +22,7 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs
  * Helper to detect if a PDF page requires multimodal vision analysis.
  * Uses three heuristics: text length, ink annotations (stylus drawing), and image rendering operators.
  */
-async function detectVisionNeed(page, text) {
+async function detectVisionNeed(page: any, text: string) {
   // Heuristic 1: Text is very short (less than 150 chars)
   if (!text || text.trim().length < 150) {
     return true;
@@ -30,7 +45,7 @@ async function detectVisionNeed(page, text) {
   // Heuristic 3: Scans for image/graphics drawing operators
   try {
     const operatorList = await page.getOperatorList();
-    const OPS = pdfjsLib.OPS || {};
+    const OPS = (pdfjsLib.OPS || {}) as Record<string, number>;
     
     // Function codes for image rendering in PDF.js
     const paintImage = OPS.paintImageXObject !== undefined ? OPS.paintImageXObject : 82;
@@ -55,14 +70,14 @@ async function detectVisionNeed(page, text) {
  * @param {File} file
  * @returns {Promise<{text: string, numPages: number, pageTexts: string[], pageMetadata: Array}>}
  */
-export async function extractTextFromPDF(file) {
+export async function extractTextFromPDF(file: File) {
   const arrayBuffer = await file.arrayBuffer();
   const data = new Uint8Array(arrayBuffer);
 
   const pdf = await pdfjsLib.getDocument({ data }).promise;
   const numPages = pdf.numPages;
-  const pageTexts = [];
-  const pageMetadata = [];
+  const pageTexts: string[] = [];
+  const pageMetadata: PageMetadata[] = [];
 
   for (let i = 1; i <= numPages; i++) {
     const page = await pdf.getPage(i);
@@ -72,6 +87,7 @@ export async function extractTextFromPDF(file) {
     let pageText = '';
 
     for (const item of textContent.items) {
+      if (!('str' in item)) continue;
       if (item.str.trim() === '') continue;
       if (lastY !== null && Math.abs(item.transform[5] - lastY) > 2) {
         pageText += '\n';
@@ -120,7 +136,7 @@ export async function extractTextFromPDF(file) {
  * @param {(progress: {current: number, total: number}) => void} [options.onProgress]
  * @returns {Promise<{images: Object, numPages: number}>} - Object mapping pageNum -> base64 data URL
  */
-export async function renderPDFPagesToImages(file, options = {}) {
+export async function renderPDFPagesToImages(file: File, options: RenderPdfOptions = {}) {
   const {
     scale = 1.0,
     quality = 0.92,
@@ -135,10 +151,11 @@ export async function renderPDFPagesToImages(file, options = {}) {
 
   const pdf = await pdfjsLib.getDocument({ data }).promise;
   const numPages = Math.min(pdf.numPages, maxPages);
-  const images = {};
+  const images: Record<number, string> = {};
 
   const canvas = document.createElement('canvas');
   const ctx = canvas.getContext('2d');
+  if (!ctx) throw new Error('Canvas 2D não está disponível neste navegador.');
 
   // Determine which page numbers to render
   const pagesToRender = pageNumbersToRender || Array.from({ length: numPages }, (_, i) => i + 1);
@@ -184,7 +201,7 @@ export async function renderPDFPagesToImages(file, options = {}) {
  * @param {number} bytes
  * @returns {string}
  */
-export function formatFileSize(bytes) {
+export function formatFileSize(bytes: number) {
   if (bytes < 1024) return bytes + ' B';
   if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
   return (bytes / (1024 * 1024)).toFixed(1) + ' MB';

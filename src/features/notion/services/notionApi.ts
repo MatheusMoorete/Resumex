@@ -1,4 +1,4 @@
-import { buildAuthHeaders } from './authClient';
+import { buildAuthHeaders } from '../../auth/services/authClient';
 
 export async function exportSummaryToNotion({ markdown, title }) {
   const response = await fetch('/api/notion/export', {

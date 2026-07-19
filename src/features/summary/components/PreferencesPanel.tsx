@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { formatFileSize } from '../services/pdfExtractor';
+import { formatFileSize } from '../../pdf/services/pdfExtractor';
 
 const METHODS = [
   { id: 'free', name: 'Livre' },
@@ -24,9 +24,9 @@ const DETAIL_LEVELS = [
   { id: 'detailed', label: 'Detalhado', desc: 'Inclui explicações, tabelas e pontos finos do material.' },
 ];
 
-function parsePageRanges(value, totalPages) {
-  const pages = new Set();
-  const invalid = [];
+function parsePageRanges(value: string, totalPages: number) {
+  const pages = new Set<number>();
+  const invalid: string[] = [];
   const parts = value
     .split(',')
     .map((part) => part.trim())

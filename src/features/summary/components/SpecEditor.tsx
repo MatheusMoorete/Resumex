@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
-import { formatFileSize } from '../services/pdfExtractor';
-import MarkdownPreview from './MarkdownPreview';
-import PdfSplitViewer from './PdfSplitViewer';
+import { formatFileSize } from '../../pdf/services/pdfExtractor';
+import MarkdownPreview from '../../../shared/components/MarkdownPreview';
+import PdfSplitViewer from '../../pdf/components/PdfSplitViewer';
 
 function getAuditStatus(specAudit) {
   if (!specAudit) return 'Pendente';

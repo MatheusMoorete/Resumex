@@ -7,15 +7,17 @@
   "scripts": {
     "dev": "vite",
     "dev:api": "node server/index.js",
-    "build": "vite build",
+    "typecheck": "tsc --noEmit",
+    "build": "npm run typecheck && vite build",
     "preview": "vite preview",
     "server": "node server/index.js",
     "start": "node server/index.js"
   },
+  "engines": {
+    "node": ">=20.9.0"
+  },
   "dependencies": {
-    "@clerk/clerk-react": "^5.61.8",
-    "@clerk/express": "^2.1.32",
-    "@clerk/localizations": "^4.11.0",
+    "@supabase/supabase-js": "^2.110.7",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
     "pdfjs-dist": "^4.9.155",
@@ -29,6 +31,7 @@
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^4.4.1",
+    "typescript": "^7.0.2",
     "vite": "^6.3.5"
   }
 }

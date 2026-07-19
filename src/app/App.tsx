@@ -1,27 +1,30 @@
 import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
-import { SignIn, useAuth, UserButton } from '@clerk/clerk-react';
-import Header from './components/Header';
-import ApiKeyModal from './components/ApiKeyModal';
-import UploadZone from './components/UploadZone';
-import PreferencesPanel from './components/PreferencesPanel';
-import SpecEditor from './components/SpecEditor';
-import ProcessingView from './components/ProcessingView';
-import ResultView from './components/ResultView';
-import QuizUpload from './components/QuizUpload';
-import QuizView from './components/QuizView';
-import QuizProcessingTimeline from './components/QuizProcessingTimeline';
-import { generateSummary } from './services/deepseekApi';
-import { buildQuizFromCorpus } from './services/quizApi';
-import { transcribePDFWithGLM } from './services/zhipuApi';
-import { renderPDFPagesToImages } from './services/pdfExtractor';
-import { setAuthTokenGetter } from './services/authClient';
+import type { AuthSession } from '../features/auth/domain/auth';
+import Header from '../shared/components/Header';
+import ApiKeyModal from '../features/auth/components/ApiKeyModal';
+import AccountButton from '../features/auth/components/AccountButton';
+import AuthScreen from '../features/auth/components/AuthScreen';
+import { authService } from '../features/auth/services/authService';
+import UploadZone from '../features/pdf/components/UploadZone';
+import PreferencesPanel from '../features/summary/components/PreferencesPanel';
+import SpecEditor from '../features/summary/components/SpecEditor';
+import ProcessingView from '../features/summary/components/ProcessingView';
+import ResultView from '../features/summary/components/ResultView';
+import QuizUpload from '../features/quiz/components/QuizUpload';
+import QuizView from '../features/quiz/components/QuizView';
+import QuizProcessingTimeline from '../features/quiz/components/QuizProcessingTimeline';
+import { generateSummary } from '../features/summary/services/deepseekApi';
+import { buildQuizFromCorpus } from '../features/quiz/services/quizApi';
+import { transcribePDFWithGLM } from '../features/summary/services/zhipuApi';
+import { renderPDFPagesToImages } from '../features/pdf/services/pdfExtractor';
+import { setAuthTokenGetter } from '../features/auth/services/authClient';
 import { 
   buildSpecPrompt, 
   buildSummaryPrompt, 
   buildSummaryUserMessage, 
   buildAuditPrompt, 
   buildAuditUserMessage 
-} from './prompts/templates';
+} from '../features/summary/prompts/templates';
 import {
   buildEvidenceMapPrompt,
   buildEvidenceMapUserMessage,
@@ -30,8 +33,8 @@ import {
   buildSpecAuditPrompt,
   buildSpecAuditUserMessage,
   buildSpecFromEvidenceUserMessage,
-} from './prompts/evidence';
-import { createMockFileData, mockSummary } from './mocks/e2eMock';
+} from '../features/summary/prompts/evidence';
+import { createMockFileData, mockSummary } from '../shared/mocks/e2eMock';
 
 function isLocalBrowserHost() {
   if (typeof window === 'undefined') return false;
@@ -299,7 +302,25 @@ function needsQuizVisionPreparation(file) {
 }
 
 export default function App() {
-  const { isLoaded, isSignedIn, getToken } = useAuth();
+  const [session, setSession] = useState<AuthSession | null>(null);
+  const [isLoaded, setIsLoaded] = useState(false);
+  const isSignedIn = Boolean(session);
+  const getToken = useCallback(async () => session?.accessToken || null, [session]);
+
+  useEffect(() => {
+    authService.getSession().then((nextSession) => {
+      setSession(nextSession);
+      setIsLoaded(true);
+    }).catch(() => {
+      setSession(null);
+      setIsLoaded(true);
+    });
+
+    return authService.onAuthStateChange((nextSession) => {
+      setSession(nextSession);
+      setIsLoaded(true);
+    });
+  }, []);
   // Core state - DeepSeek generates text; GLM transcribes visual/handwritten pages.
   // Local keys are optional overrides. Server-side env keys are preferred.
   const [appState, setAppState] = useState('upload');
@@ -496,7 +517,7 @@ export default function App() {
     setAppState('quiz-upload');
   }, []);
 
-  const handleGenerateQuiz = useCallback(async (files, options = {}) => {
+  const handleGenerateQuiz = useCallback(async (files, options: any = {}) => {
     if (!hasDeepseekAccess) {
       setShowApiKeyModal(true);
       return;
@@ -627,7 +648,7 @@ export default function App() {
   }, [deepseekKey, hasDeepseekAccess, hasZhipuAccess, quizOptions.questionCount, quizOptions.questionMode, zhipuKey]);
 
   // --- Preferences selected → generate SPEC ---
-  const handleGenerateQuizVariant = useCallback((variant, payload = {}) => {
+  const handleGenerateQuizVariant = useCallback((variant, payload: any = {}) => {
     if (!quizFiles.length || !quizQuestions.length) return;
 
     handleGenerateQuiz(quizFiles, {
@@ -1101,38 +1122,7 @@ Você DEVE obrigatoriamente incluir e detalhar todas as informações, critério
   }
 
   if (!isE2EMockMode && !isSignedIn) {
-    return (
-      <div className="auth-screen">
-        <div className="auth-panel clerk-auth-panel">
-          <SignIn
-            signUpUrl="/"
-            appearance={{
-              variables: {
-                colorPrimary: '#8fb8a8',
-                colorBackground: '#171c18',
-                colorInputBackground: '#202720',
-                colorInputText: '#f3efe7',
-                colorText: '#f3efe7',
-                colorTextSecondary: '#b8b4aa',
-                colorNeutral: '#8f8a80',
-                borderRadius: '8px',
-                fontFamily: '"IBM Plex Sans", system-ui, sans-serif',
-              },
-              elements: {
-                rootBox: 'clerk-root-box',
-                card: 'clerk-card',
-                headerTitle: 'clerk-header-title',
-                headerSubtitle: 'clerk-header-subtitle',
-                socialButtonsBlockButton: 'clerk-social-button',
-                footerAction: 'clerk-footer-action',
-                footer: 'clerk-footer',
-                formButtonPrimary: 'clerk-primary-button',
-              },
-            }}
-          />
-        </div>
-      </div>
-    );
+    return <AuthScreen />;
   }
 
   if (accessDenied) {
@@ -1148,7 +1138,7 @@ Você DEVE obrigatoriamente incluir e detalhar todas as informações, critério
           <div className="upload-error">
             Esta conta Google não está na allowlist do servidor.
           </div>
-          <UserButton afterSignOutUrl="/" />
+          {session?.user && <AccountButton user={session.user} />}
         </div>
       </div>
     );
@@ -1163,7 +1153,7 @@ Você DEVE obrigatoriamente incluir e detalhar todas as informações, critério
           deepseekAvailable={hasDeepseekAccess}
           zhipuAvailable={hasZhipuAccess}
           onOpenApiKeyModal={() => setShowApiKeyModal(true)}
-          userActions={<UserButton afterSignOutUrl="/" />}
+          userActions={session?.user ? <AccountButton user={session.user} /> : null}
         />
 
         {appState === 'upload' && (

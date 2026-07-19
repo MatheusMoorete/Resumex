@@ -2,6 +2,11 @@ import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeRaw from 'rehype-raw';
 
+type MarkdownPreviewProps = {
+  content: string;
+  onPageClick?: (page: number, source: string) => void;
+};
+
 function escapeHtmlAttr(value) {
   return String(value)
     .replace(/&/g, '&amp;')
@@ -44,7 +49,7 @@ function processPageRefs(markdown) {
   );
 }
 
-export default function MarkdownPreview({ content, onPageClick }) {
+export default function MarkdownPreview({ content, onPageClick }: MarkdownPreviewProps) {
   if (!content) {
     return (
       <div className="markdown-body" style={{ color: 'var(--text-muted)', textAlign: 'center', padding: 'var(--space-3xl)' }}>

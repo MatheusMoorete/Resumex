@@ -5,7 +5,7 @@
  */
 
 import { buildVisionTranscriptionPrompt } from '../prompts/templates';
-import { buildAuthHeaders } from './authClient';
+import { buildAuthHeaders } from '../../auth/services/authClient';
 
 const API_URL = '/api/zhipu/chat/completions';
 const MODEL_NAME = 'glm-4.5v';
