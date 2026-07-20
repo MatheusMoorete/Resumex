@@ -68,7 +68,7 @@ function textContent(response) {
   return '';
 }
 
-async function chat(providerName, model, messages, maxTokens) {
+async function chat(providerName, model, messages, maxTokens, { allowTruncated = false } = {}) {
   const provider = PROVIDERS[providerName];
   if (!provider?.key) throw new Error(`Chave não configurada para ${providerName}.`);
 
@@ -95,10 +95,11 @@ async function chat(providerName, model, messages, maxTokens) {
     }
     const content = textContent(payload);
     if (!content) throw new Error(`${providerName} retornou conteúdo vazio.`);
-    if (payload?.choices?.[0]?.finish_reason === 'length') {
+    const truncated = payload?.choices?.[0]?.finish_reason === 'length';
+    if (truncated && !allowTruncated) {
       throw new Error(`${providerName} atingiu o limite de saída e retornaria conteúdo incompleto.`);
     }
-    return { content, usage: payload.usage || null };
+    return { content, usage: payload.usage || null, truncated };
   } finally {
     clearTimeout(timeout);
   }
@@ -113,35 +114,46 @@ function normalizeVisualUncertainty(item) {
     ? bbox.map((value) => Math.max(0, Math.min(1, value)))
     : null;
   return {
-    text: String(item?.text || item?.reading || 'Trecho visual incerto.'),
-    reason: String(item?.reason || 'Leitura visual incerta.'),
+    text: String(item?.text || item?.reading || 'Trecho visual incerto.').slice(0, 240),
+    reason: String(item?.reason || 'Leitura visual incerta.').slice(0, 240),
     bbox: validBbox && validBbox[2] > validBbox[0] && validBbox[3] > validBbox[1]
       ? validBbox
       : null,
   };
 }
 
-function visualJson(content) {
+function visualJson(content, truncated = false) {
   const unfenced = content.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
   try {
     const parsed = JSON.parse(unfenced);
     const confidence = Number(parsed.confidence);
+    const uncertainties = Array.isArray(parsed.uncertainties)
+      ? parsed.uncertainties.slice(0, 8).map(normalizeVisualUncertainty)
+      : [];
+    if (truncated && !uncertainties.length) {
+      uncertainties.push(normalizeVisualUncertainty({
+        text: 'Página visual extensa; confira os trechos manuscritos.',
+        reason: 'A resposta visual chegou ao limite antes de confirmar toda a página.',
+      }));
+    }
     return {
-      visualContent: String(parsed.visualContent || ''),
-      handwriting: String(parsed.handwriting || ''),
+      visualContent: String(parsed.visualContent || '').slice(0, 1600),
+      handwriting: String(parsed.handwriting || '').slice(0, 1600),
       confidence: Number.isFinite(confidence) ? Math.max(0, Math.min(1, confidence)) : 0,
-      uncertainties: Array.isArray(parsed.uncertainties)
-        ? parsed.uncertainties.map(normalizeVisualUncertainty)
-        : [],
+      uncertainties,
     };
   } catch {
     return {
-      visualContent: content,
+      visualContent: '',
       handwriting: '',
       confidence: 0,
       uncertainties: [normalizeVisualUncertainty({
-        text: 'Resposta visual não estruturada.',
-        reason: 'A leitura precisa de confirmação.',
+        text: truncated
+          ? 'Página visual extensa; confira os trechos manuscritos.'
+          : 'Não foi possível estruturar a leitura desta página.',
+        reason: truncated
+          ? 'A resposta visual chegou ao limite e foi encaminhada para sua revisão.'
+          : 'A leitura precisa de confirmação.',
       })],
     };
   }
@@ -165,9 +177,15 @@ async function imageMessage(page, instruction) {
 }
 
 async function readVisualPage(page) {
-  const instruction = `Analise somente o que o texto selecionável não captura na página ${page.page}: imagens, tabelas visuais, setas, grifos e manuscritos. Não repita o texto impresso, não resuma e não use conhecimento externo. Preserve números, unidades e comparadores literalmente. Para cada trecho duvidoso, informe uma caixa normalizada [esquerda, topo, direita, base], com valores de 0 a 1 relativos à página. Responda apenas JSON: {"visualContent":"", "handwriting":"", "confidence":0.0, "uncertainties":[{"text":"leitura provável", "reason":"motivo da dúvida", "bbox":[0.0,0.0,1.0,1.0]}]}.`;
-  const response = await chat('glm', MODELS.glm, await imageMessage(page, instruction), 2200);
-  return { result: visualJson(response.content), glmUsage: response.usage };
+  const instruction = `Analise somente o que o texto selecionável não captura na página ${page.page}: manuscritos, setas, imagens e tabelas realmente visuais. NÃO transcreva nem resuma o texto impresso. Seja extremamente conciso: visualContent e handwriting devem ter no máximo 800 caracteres cada; uncertainties deve ter no máximo 5 itens, com text e reason de até 120 caracteres. Preserve números, unidades e comparadores literalmente. Em cada dúvida, informe bbox normalizada [esquerda, topo, direita, base], de 0 a 1. Responda somente JSON válido: {"visualContent":"", "handwriting":"", "confidence":0.0, "uncertainties":[{"text":"leitura provável", "reason":"motivo", "bbox":[0.0,0.0,1.0,1.0]}]}.`;
+  const response = await chat(
+    'glm',
+    MODELS.glm,
+    await imageMessage(page, instruction),
+    2200,
+    { allowTruncated: true }
+  );
+  return { result: visualJson(response.content, response.truncated), glmUsage: response.usage };
 }
 
 function visualQuestions(pages) {

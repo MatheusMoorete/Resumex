@@ -1857,7 +1857,12 @@ Você DEVE obrigatoriamente incluir e detalhar todas as informações, critério
                 Recomeçar
               </button>
               {fileData && preferences && (
-                <button className="btn btn-primary" onClick={handleGenerateFromSpec}>
+                <button
+                  className="btn btn-primary"
+                  onClick={() => activeSummaryJobId
+                    ? handleGenerateFromSpec()
+                    : handlePreferencesComplete(preferences)}
+                >
                   <RefreshCw size={18} aria-hidden="true" />
                   Tentar Novamente
                 </button>
