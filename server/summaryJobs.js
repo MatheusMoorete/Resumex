@@ -68,14 +68,19 @@ function textContent(response) {
   return '';
 }
 
-async function chat(providerName, model, messages, maxTokens, { allowTruncated = false } = {}) {
+async function chat(providerName, model, messages, maxTokens, {
+  allowEmpty = false,
+  allowTruncated = false,
+} = {}) {
   const provider = PROVIDERS[providerName];
   if (!provider?.key) throw new Error(`Chave não configurada para ${providerName}.`);
 
   const body = { model, messages, stream: false };
   body.max_tokens = maxTokens;
   body.temperature = providerName === 'glm' ? 0.05 : 0.1;
-  if (providerName === 'deepseek') body.thinking = { type: 'disabled' };
+  if (providerName === 'deepseek' || providerName === 'glm') {
+    body.thinking = { type: 'disabled' };
+  }
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), Number(process.env.AI_UPSTREAM_TIMEOUT_MS || 600000));
@@ -94,7 +99,7 @@ async function chat(providerName, model, messages, maxTokens, { allowTruncated =
       throw new Error(payload?.error?.message || `${providerName} respondeu ${response.status}.`);
     }
     const content = textContent(payload);
-    if (!content) throw new Error(`${providerName} retornou conteúdo vazio.`);
+    if (!content && !allowEmpty) throw new Error(`${providerName} retornou conteúdo vazio.`);
     const truncated = payload?.choices?.[0]?.finish_reason === 'length';
     if (truncated && !allowTruncated) {
       throw new Error(`${providerName} atingiu o limite de saída e retornaria conteúdo incompleto.`);
@@ -183,9 +188,21 @@ async function readVisualPage(page) {
     MODELS.glm,
     await imageMessage(page, instruction),
     2200,
-    { allowTruncated: true }
+    { allowEmpty: true, allowTruncated: true }
   );
-  return { result: visualJson(response.content, response.truncated), glmUsage: response.usage };
+  const degraded = !response.content || response.truncated;
+  if (degraded) {
+    console.warn(JSON.stringify({
+      event: 'summary_visual_review_required',
+      page: page.page,
+      reason: response.truncated ? 'output_limit' : 'empty_content',
+    }));
+  }
+  return {
+    result: visualJson(response.content, response.truncated),
+    glmUsage: response.usage,
+    degraded,
+  };
 }
 
 function visualQuestions(pages) {
@@ -369,6 +386,7 @@ async function prepareJob(job) {
       pages: manifest.pageCount,
       visualPages: visualPages.length,
       glmCalls: visualPages.length,
+      glmDegradedPages: visualResults.filter((item) => item.degraded).length,
       kimiCalls: 0,
       deepseekCalls: 1,
       durationMs: Date.now() - startedAt,
