@@ -2,18 +2,20 @@ import { Check, Circle } from 'lucide-react';
 import NotebookLoadingAnimation from '../../loading/components/NotebookLoadingAnimation';
 
 const STEPS = [
-  { stages: ['uploading', 'queued', 'extracting'], label: 'Extraindo o PDF com PyMuPDF' },
-  { stages: ['vision_glm', 'vision_kimi'], label: 'Lendo somente imagens e manuscritos necessários' },
-  { stages: ['summarizing', 'completed'], label: 'Gerando uma versão final com o DeepSeek' },
+  { stages: ['uploading', 'queued', 'extracting'], label: 'Lendo e organizando o conteúdo do material' },
+  { stages: ['vision_glm'], label: 'Conferindo imagens e manuscritos necessários' },
+  { stages: ['planning', 'awaiting_review'], label: 'Preparando um plano para sua revisão' },
+  { stages: ['queued_final', 'summarizing', 'completed'], label: 'Gerando a versão final com nosso agente especializado' },
 ];
 
 export default function ProcessingView({ stage = 'queued', progress = 0 }) {
-  const activeStep = Math.max(0, STEPS.findIndex((step) => step.stages.includes(stage)));
+  const isComplete = stage === 'completed';
+  const activeStep = isComplete ? STEPS.length : Math.max(0, STEPS.findIndex((step) => step.stages.includes(stage)));
 
   return (
     <div className="processing-section summary-processing-section">
       <span className="processing-kicker">RESUMO / FLUXO OTIMIZADO</span>
-      <NotebookLoadingAnimation duration={.78} />
+      <NotebookLoadingAnimation duration={.78} closing={isComplete} />
 
       <div className="processing-text" role="status" aria-live="polite">
         <h3>Preparando seu resumo</h3>

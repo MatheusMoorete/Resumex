@@ -41,6 +41,22 @@ def render_page(page, destination: Path) -> None:
     destination.write_bytes(pixmap.tobytes("jpeg", jpg_quality=76))
 
 
+def extract_text(page) -> tuple[str, bool]:
+    text = page.get_text("text", sort=True).strip()
+    if len(text) >= 150:
+        return text, False
+
+    try:
+        text_page = page.get_textpage_ocr(language="por+eng", dpi=180, full=False)
+        ocr_text = page.get_text("text", textpage=text_page, sort=True).strip()
+        if len(ocr_text) > len(text):
+            return ocr_text, True
+    except RuntimeError:
+        # ponytail: OCR local é opcional; sem Tesseract, a página segue para a visão.
+        pass
+    return text, False
+
+
 def process(files: list[Path], output_dir: Path, mode: str, manual_pages: set[int]) -> dict:
     import pymupdf as fitz
 
@@ -57,7 +73,7 @@ def process(files: list[Path], output_dir: Path, mode: str, manual_pages: set[in
                 global_page += 1
                 if global_page > 300:
                     raise ValueError("Limite de 300 páginas por job excedido")
-                text = page.get_text("text", sort=True).strip()
+                text, ocr_used = extract_text(page)
                 reasons = vision_reasons(page, text)
                 needs_vision = (
                     mode == "all"
@@ -75,6 +91,7 @@ def process(files: list[Path], output_dir: Path, mode: str, manual_pages: set[in
                     "sourceName": file_path.name,
                     "sourcePage": source_page,
                     "text": text,
+                    "ocrUsed": ocr_used,
                     "needsVision": needs_vision,
                     "reasons": reasons,
                     "imagePath": str(image_path) if image_path else None,

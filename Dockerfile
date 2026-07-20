@@ -22,11 +22,12 @@ FROM node:22-bookworm-slim AS runtime
 ENV NODE_ENV=production
 ENV PORT=10000
 ENV PATH="/opt/resumex-python/bin:$PATH"
+ENV TESSDATA_PREFIX="/usr/share/tesseract-ocr/5/tessdata"
 
 WORKDIR /app
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends python3 python3-venv \
+    && apt-get install -y --no-install-recommends python3 python3-venv tesseract-ocr tesseract-ocr-por tesseract-ocr-eng \
     && python3 -m venv /opt/resumex-python \
     && rm -rf /var/lib/apt/lists/*
 

@@ -39,7 +39,7 @@ function getItemRect(item, viewport) {
   };
 }
 
-export default function PdfSplitViewer({ pdfUrl, activePage = 1, sourceText = '' }) {
+export default function PdfSplitViewer({ pdfUrl, activePage = 1, sourceText = '', focusRect = null }) {
   const canvasRef = useRef(null);
   const renderTaskRef = useRef(null);
   const [pdf, setPdf] = useState(null);
@@ -203,6 +203,17 @@ export default function PdfSplitViewer({ pdfUrl, activePage = 1, sourceText = ''
               }}
             />
           ))}
+          {focusRect && (
+            <span
+              className="pdf-focus-box"
+              style={{
+                left: `${focusRect[0] * 100}%`,
+                top: `${focusRect[1] * 100}%`,
+                width: `${(focusRect[2] - focusRect[0]) * 100}%`,
+                height: `${(focusRect[3] - focusRect[1]) * 100}%`,
+              }}
+            />
+          )}
           {fallbackHighlight && (
             <span className="pdf-page-highlight-label">
               Referência localizada nesta página; trecho exato não encontrado na camada de texto.

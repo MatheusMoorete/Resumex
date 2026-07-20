@@ -63,7 +63,6 @@ export default function PreferencesPanel({
   fileData,
   deepseekAvailable,
   zhipuAvailable,
-  kimiAvailable,
   onContinue,
   onBack,
 }) {
@@ -106,7 +105,6 @@ export default function PreferencesPanel({
     const missing = [];
     if (!deepseekAvailable) missing.push('DeepSeek');
     if (readHandwriting && !zhipuAvailable) missing.push('Zhipu AI');
-    if (readHandwriting && !kimiAvailable) missing.push('Kimi');
     return missing.length > 0 ? missing.join(' e ') : null;
   };
 
@@ -232,7 +230,7 @@ export default function PreferencesPanel({
 
               <div className="prefs-estimate">
                 <span>{pagesSentToGlm.length} páginas serão lidas por visão</span>
-                <span>Auto: {detectedVisionPages.length ? detectedVisionPages.join(', ') : 'nenhuma'}</span>
+                <span>Dúvidas de leitura aparecerão no plano para você confirmar</span>
               </div>
 
               {hasInvalidManualPages && (

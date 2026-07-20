@@ -2842,6 +2842,16 @@ select.input option {
   animation: fadeIn var(--transition-base) ease;
 }
 
+.pdf-focus-box {
+  position: absolute;
+  z-index: 2;
+  pointer-events: none;
+  border: 3px solid #d77a2d;
+  border-radius: 4px;
+  background: rgba(248, 233, 169, 0.22);
+  box-shadow: 0 0 0 9999px rgba(19, 27, 23, 0.16), 0 0 0 3px rgba(255, 253, 246, 0.9);
+}
+
 .pdf-canvas-wrap.fallback-highlight::after {
   content: '';
   position: absolute;
@@ -3629,6 +3639,87 @@ select.input option {
   color: var(--text-primary);
 }
 
+.spec-risk-evidence {
+  display: grid;
+  grid-template-columns: minmax(180px, 34%) 1fr;
+  align-items: start;
+  gap: var(--space-lg);
+}
+
+.pdf-region-trigger {
+  position: relative;
+  min-height: 132px;
+  padding: 0;
+  overflow: visible;
+  color: var(--text-secondary);
+  background: #f4efe5;
+  border: 1.5px solid currentColor;
+  border-radius: var(--radius-md);
+  cursor: zoom-in;
+}
+
+.pdf-region-trigger:focus-visible {
+  outline: 3px solid var(--accent-cyan);
+  outline-offset: 3px;
+}
+
+.pdf-region-thumb {
+  display: block;
+  width: 100%;
+  height: 132px;
+  object-fit: contain;
+  background: #fff;
+  border-radius: calc(var(--radius-md) - 2px);
+}
+
+.pdf-region-loading {
+  display: grid;
+  min-height: 132px;
+  place-items: center;
+  padding: var(--space-md);
+  font-size: var(--font-size-xs);
+}
+
+.pdf-region-hovercard {
+  position: absolute;
+  z-index: 40;
+  left: calc(100% + 12px);
+  top: 50%;
+  width: min(500px, 55vw);
+  padding: 8px;
+  visibility: hidden;
+  opacity: 0;
+  color: #203229;
+  background: #fffdf6;
+  border: 2px solid #203229;
+  border-radius: 3px;
+  box-shadow: 8px 10px 0 rgba(32, 50, 41, 0.2);
+  transform: translate(6px, -50%);
+  transition: opacity 140ms ease, transform 140ms ease, visibility 140ms ease;
+  pointer-events: none;
+}
+
+.pdf-region-hovercard img {
+  display: block;
+  width: 100%;
+  max-height: 430px;
+  object-fit: contain;
+}
+
+.pdf-region-hovercard strong {
+  display: block;
+  padding: 8px 5px 2px;
+  font-size: var(--font-size-xs);
+  text-align: left;
+}
+
+.pdf-region-trigger:hover .pdf-region-hovercard,
+.pdf-region-trigger:focus-visible .pdf-region-hovercard {
+  visibility: visible;
+  opacity: 1;
+  transform: translate(0, -50%);
+}
+
 .spec-risk-text {
   color: var(--text-primary);
   font-family: var(--font-mono);
@@ -3640,6 +3731,18 @@ select.input option {
   color: var(--text-secondary);
   font-size: var(--font-size-sm);
   line-height: 1.5;
+}
+
+.spec-risk-answer {
+  width: fit-content;
+  margin-top: var(--space-md);
+  padding: var(--space-xs) var(--space-sm);
+  color: var(--accent-mint);
+  font-size: var(--font-size-xs);
+  font-weight: 800;
+  background: rgba(143, 184, 168, 0.12);
+  border: 1px solid rgba(143, 184, 168, 0.38);
+  border-radius: var(--radius-sm);
 }
 
 .spec-risk-pdf-button {
@@ -3706,8 +3809,9 @@ select.input option {
 .pdf-review-modal {
   width: min(980px, 100%);
   height: min(86vh, 920px);
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 340px);
+  grid-template-rows: auto minmax(0, 1fr);
   overflow: hidden;
   background: var(--bg-secondary);
   border: 1px solid var(--border-glass);
@@ -3716,6 +3820,7 @@ select.input option {
 }
 
 .pdf-review-header {
+  grid-column: 1 / -1;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -3743,6 +3848,74 @@ select.input option {
   min-height: 0;
   border: 0;
   border-radius: 0;
+}
+
+.pdf-review-question {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+  min-height: 0;
+  padding: var(--space-lg);
+  overflow-y: auto;
+  color: var(--text-primary);
+  background: var(--bg-primary);
+  border-left: 1px solid var(--border-glass);
+}
+
+.pdf-review-question h3,
+.pdf-review-question p {
+  margin: 0;
+}
+
+.pdf-review-question p {
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+  line-height: 1.55;
+}
+
+.pdf-review-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-sm);
+}
+
+.pdf-review-actions .selected {
+  color: var(--accent-mint);
+  border-color: var(--accent-mint);
+}
+
+@media (max-width: 760px) {
+  .spec-risk-evidence {
+    grid-template-columns: 1fr;
+  }
+
+  .pdf-region-hovercard {
+    display: none;
+  }
+
+  .pdf-review-overlay {
+    padding: 0;
+  }
+
+  .pdf-review-modal {
+    width: 100%;
+    height: 100%;
+    grid-template-columns: 1fr;
+    grid-template-rows: auto minmax(260px, 52vh) minmax(0, 1fr);
+    border: 0;
+    border-radius: 0;
+  }
+
+  .pdf-review-header,
+  .pdf-review-modal .pdf-split-viewer,
+  .pdf-review-question {
+    grid-column: 1;
+  }
+
+  .pdf-review-question {
+    border-top: 1px solid var(--border-glass);
+    border-left: 0;
+  }
 }
 
 /* =============================================
@@ -6770,3 +6943,30 @@ select.input option {
   .analysis-fichario .spec-actions .btn { width: 100%; }
   .analysis-fichario .summary-processing-section { min-height: 600px; }
 }
+
+/* Durex do Fichário Vivo: uma única textura para todas as fitas do app. */
+.auth-login-card::before,
+.app-loading-shell::before,
+.home-confirmation-dialog::before,
+.workspace-home-fichario .workspace-upload-panel::before,
+.workspace-home-fichario .quiz-upload-section.is-embedded .quiz-upload-shell::before,
+.workspace-home-fichario .flashcard-embedded-panel::before,
+.workspace-home-fichario .study-mode-panel-stage::before {
+  border: 0;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, .5), rgba(255, 255, 255, .08) 46%, rgba(32, 50, 41, .12)),
+    linear-gradient(90deg, rgba(255, 255, 255, .14), transparent 15% 84%, rgba(32, 50, 41, .08)),
+    var(--durex-color);
+  clip-path: polygon(1% 8%, 24% 5%, 49% 8%, 74% 3%, 99% 7%, 98% 92%, 76% 89%, 51% 96%, 27% 91%, 1% 96%);
+  opacity: .84;
+  box-shadow: 0 2px 4px rgba(23, 37, 30, .24), inset 0 1px rgba(255, 255, 255, .38);
+  backdrop-filter: blur(.6px) saturate(.82);
+}
+
+.auth-login-card::before { --durex-color: var(--auth-yellow); }
+.app-loading-shell::before { --durex-color: var(--loading-yellow); }
+.home-confirmation-dialog::before { --durex-color: var(--fichario-yellow); }
+.workspace-home-fichario .workspace-upload-panel::before,
+.workspace-home-fichario .quiz-upload-section.is-embedded .quiz-upload-shell::before,
+.workspace-home-fichario .flashcard-embedded-panel::before,
+.workspace-home-fichario .study-mode-panel-stage::before { --durex-color: var(--active-tab-color); }

@@ -12,7 +12,11 @@ import PreferencesPanel from '../features/summary/components/PreferencesPanel';
 import SpecEditor from '../features/summary/components/SpecEditor';
 import ProcessingView from '../features/summary/components/ProcessingView';
 import ResultView from '../features/summary/components/ResultView';
-import { runSummaryJob } from '../features/summary/services/summaryJobApi';
+import {
+  finalizeSummaryJob,
+  prepareSummaryJob,
+  type VisualQuestion,
+} from '../features/summary/services/summaryJobApi';
 import QuizView from '../features/quiz/components/QuizView';
 import QuizProcessingTimeline from '../features/quiz/components/QuizProcessingTimeline';
 import { generateSummary } from '../features/summary/services/deepseekApi';
@@ -459,6 +463,8 @@ export default function App() {
   const [specCorrectionCount, setSpecCorrectionCount] = useState(0);
   const [specGenerationStage, setSpecGenerationStage] = useState('evidence');
   const [riskDecisions, setRiskDecisions] = useState({});
+  const [activeSummaryJobId, setActiveSummaryJobId] = useState<string | null>(null);
+  const [visualQuestions, setVisualQuestions] = useState<VisualQuestion[]>([]);
   const [summary, setSummary] = useState('');
   const [summaryLog, setSummaryLog] = useState('');
   const [summaryJob, setSummaryJob] = useState({ stage: 'queued', progress: 0 });
@@ -513,8 +519,10 @@ export default function App() {
   const hasZhipuAccess = Boolean(zhipuKey || serverConfig.zhipuConfigured);
   const hasIndependentAuditor = Boolean(serverConfig.auditorConfigured);
   const highRiskItems = useMemo(
-    () => extractHighRiskEvidenceItems(evidenceMap || fileData?.evidenceMap || ''),
-    [evidenceMap, fileData]
+    () => visualQuestions.length
+      ? visualQuestions
+      : extractHighRiskEvidenceItems(evidenceMap || fileData?.evidenceMap || ''),
+    [evidenceMap, fileData, visualQuestions]
   );
   const unresolvedRiskCount = highRiskItems.filter((item) => !isRiskDecisionResolved(riskDecisions[item.id])).length;
 
@@ -650,6 +658,8 @@ export default function App() {
     setSpecAudit('');
     setSpecCorrectionCount(0);
     setRiskDecisions({});
+    setActiveSummaryJobId(null);
+    setVisualQuestions([]);
     setSummary('');
     setSummaryLog('');
     setIsAuditing(false);
@@ -905,8 +915,8 @@ export default function App() {
       setAppState('error');
       return;
     }
-    if (prefs.readHandwriting && (!serverConfig.zhipuConfigured || !serverConfig.kimiConfigured)) {
-      setError('Configure ZHIPU_API_KEY e KIMI_API_KEY no servidor para a leitura visual com correção de dúvidas.');
+    if (prefs.readHandwriting && !serverConfig.zhipuConfigured) {
+      setError('Configure ZHIPU_API_KEY no servidor para a leitura visual.');
       setAppState('error');
       return;
     }
@@ -918,27 +928,37 @@ export default function App() {
     abortControllerRef.current = controller;
     setSummary('');
     setSummaryLog('');
+    setSpec('');
+    setSpecAudit('');
+    setRiskDecisions({});
+    setVisualQuestions([]);
+    setActiveSummaryJobId(null);
     setSummaryJob({ stage: 'uploading', progress: 0 });
     setError('');
     setAppState('processing');
 
     try {
-      const job = await runSummaryJob({
+      const job = await prepareSummaryJob({
         files,
         preferences: prefs,
         signal: controller.signal,
         onProgress: setSummaryJob,
       });
-      setSummary(job.summary || '');
-      setSummaryLog(job.metrics ? `## Processamento\n\n\`\`\`json\n${JSON.stringify(job.metrics, null, 2)}\n\`\`\`` : '');
+      setActiveSummaryJobId(job.id);
+      setSpec(job.spec || '');
+      setVisualQuestions(job.questions || []);
       setMissingPages([]);
-      setAppState('result');
+      if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+        await new Promise((resolve) => window.setTimeout(resolve, 850));
+      }
+      if (controller.signal.aborted) return;
+      setAppState('edit-spec');
     } catch (jobError) {
       if (jobError?.name === 'AbortError') return;
       setError(jobError instanceof Error ? jobError.message : 'Erro ao gerar o resumo.');
       setAppState('error');
     }
-  }, [fileData, isLocalTestFlow, runLocalSpecFlow, serverConfig.deepseekConfigured, serverConfig.kimiConfigured, serverConfig.zhipuConfigured, setAppState]);
+  }, [fileData, isLocalTestFlow, runLocalSpecFlow, serverConfig.deepseekConfigured, serverConfig.zhipuConfigured, setAppState]);
 
   // --- Generate SPEC (Step 1) ---
   const generateSpec = useCallback(async (data, prefs) => {
@@ -1210,6 +1230,7 @@ export default function App() {
     if (unresolvedRiskCount > 0) return;
 
     setAppState('processing');
+    setSummaryJob({ stage: 'summarizing', progress: 80 });
     setSummary('');
     setSummaryLog('');
     setIsAuditing(false);
@@ -1376,6 +1397,11 @@ export default function App() {
       }
 
       setIsAuditing(false);
+      setSummaryJob({ stage: 'completed', progress: 100 });
+      if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+        await new Promise((resolve) => window.setTimeout(resolve, 850));
+      }
+      if (abortControllerRef.current.signal.aborted) return;
       setAppState('result');
     } catch (err) {
       if (err.name === 'AbortError') return;
@@ -1396,6 +1422,7 @@ export default function App() {
       setSummary('');
       setSummaryLog('');
       setIsAuditing(false);
+      setSummaryJob({ stage: 'summarizing', progress: 80 });
       setAppState('processing');
 
       void (async () => {
@@ -1407,13 +1434,59 @@ export default function App() {
         setSummary(mockSummary);
         setSummaryLog(mockSummaryLog);
         setIsAuditing(false);
+        setSummaryJob({ stage: 'completed', progress: 100 });
+        if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+          await waitForLocalTest(850);
+        }
+        if (controller.signal.aborted) return;
         setAppState('result');
       })();
       return;
     }
 
+    if (activeSummaryJobId) {
+      if (unresolvedRiskCount > 0 || !spec.trim()) return;
+      const controller = new AbortController();
+      abortControllerRef.current = controller;
+      setSummary('');
+      setSummaryLog('');
+      setSummaryJob({ stage: 'queued_final', progress: 76 });
+      setError('');
+      setAppState('processing');
+
+      const answers = highRiskItems.map((item) => ({
+        id: item.id,
+        action: riskDecisions[item.id]?.action,
+        value: riskDecisions[item.id]?.value || '',
+      }));
+
+      void (async () => {
+        try {
+          const job = await finalizeSummaryJob({
+            jobId: activeSummaryJobId,
+            spec,
+            answers,
+            signal: controller.signal,
+            onProgress: setSummaryJob,
+          });
+          setSummary(job.summary || '');
+          setMissingPages([]);
+          if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+            await new Promise((resolve) => window.setTimeout(resolve, 850));
+          }
+          if (controller.signal.aborted) return;
+          setAppState('result');
+        } catch (jobError) {
+          if (jobError?.name === 'AbortError') return;
+          setError(jobError instanceof Error ? jobError.message : 'Erro ao gerar o resumo.');
+          setAppState('error');
+        }
+      })();
+      return;
+    }
+
     runSummaryGeneration('');
-  }, [isLocalTestFlow, runSummaryGeneration]);
+  }, [activeSummaryJobId, highRiskItems, isLocalTestFlow, riskDecisions, runSummaryGeneration, spec, unresolvedRiskCount]);
 
   // --- Reinforcement Regeneration ---
   const handleRegenerateWithCoverage = useCallback(() => {
@@ -1467,6 +1540,8 @@ Você DEVE obrigatoriamente incluir e detalhar todas as informações, critério
     setSpecAudit('');
     setSpecCorrectionCount(0);
     setRiskDecisions({});
+    setActiveSummaryJobId(null);
+    setVisualQuestions([]);
     setSummary('');
     setSummaryLog('');
     setIsAuditing(false);
@@ -1541,6 +1616,8 @@ Você DEVE obrigatoriamente incluir e detalhar todas as informações, critério
     setSpecAudit('');
     setSpecCorrectionCount(0);
     setRiskDecisions({});
+    setActiveSummaryJobId(null);
+    setVisualQuestions([]);
     setSummary('');
     setSummaryLog('');
     setMissingPages([]);
@@ -1562,6 +1639,8 @@ Você DEVE obrigatoriamente incluir e detalhar todas as informações, critério
     setSpecAudit('');
     setSpecCorrectionCount(0);
     setRiskDecisions({});
+    setActiveSummaryJobId(null);
+    setVisualQuestions([]);
     setSummary('');
     setSummaryLog('');
     setMissingPages([]);
@@ -1653,7 +1732,6 @@ Você DEVE obrigatoriamente incluir e detalhar todas as informações, critério
             fileData={fileData}
             deepseekAvailable={serverConfig.deepseekConfigured}
             zhipuAvailable={serverConfig.zhipuConfigured}
-            kimiAvailable={serverConfig.kimiConfigured}
             onContinue={handlePreferencesComplete}
             onBack={handleBackToUpload}
           />
@@ -1726,8 +1804,9 @@ Você DEVE obrigatoriamente incluir e detalhar todas as informações, critério
             onSpecChange={setSpec}
             onRiskDecisionChange={handleRiskDecisionChange}
             onGenerate={handleGenerateFromSpec}
-            onRegenerateSpec={handleRegenerateSpec}
+            onRegenerateSpec={activeSummaryJobId ? undefined : handleRegenerateSpec}
             onBack={handleBackToPreferences}
+            isVisualReview={Boolean(activeSummaryJobId)}
           />
         )}
 

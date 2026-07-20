@@ -11,7 +11,7 @@
   max-width: none;
   height: 100%;
   display: block;
-  animation: five-frame-loading var(--loading-duration, 1.2s) linear infinite;
+  animation: notebook-page-flip var(--loading-duration, .8s) linear infinite;
   will-change: transform;
 }
 
@@ -19,7 +19,17 @@
   animation-play-state: paused;
 }
 
-@keyframes five-frame-loading {
+@keyframes notebook-page-flip {
+  0%, 44.99% { transform: translateX(0); }
+  45%, 89.99% { transform: translateX(-20%); }
+  90%, 100% { transform: translateX(0); }
+}
+
+.notebook-animation.is-closing .loading-animation-sprite {
+  animation: notebook-close .78s linear 1 forwards;
+}
+
+@keyframes notebook-close {
   0%, 19.99% { transform: translateX(0); }
   20%, 39.99% { transform: translateX(-20%); }
   40%, 59.99% { transform: translateX(-40%); }
@@ -60,6 +70,10 @@
   }
 
   .notebook-animation .loading-animation-sprite {
+    transform: translateX(0);
+  }
+
+  .notebook-animation.is-closing .loading-animation-sprite {
     transform: translateX(-80%);
   }
 

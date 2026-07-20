@@ -6,7 +6,7 @@ O produto deve gerar resumos e simulados fiéis ao material enviado, rastreávei
 
 ## Princípios obrigatórios
 
-1. Geração e auditoria usam provedores independentes.
+1. Incertezas visuais são confirmadas pelo usuário; auditorias automáticas, quando habilitadas, usam provedor independente.
 2. O PDF é a única fonte factual. Conhecimento externo do modelo não pode preencher lacunas.
 3. Toda afirmação crítica deve ser rastreável até página ou trecho literal.
 4. Conteúdo truncado, auditoria ausente ou evidência não localizada causa falha fechada.
@@ -33,22 +33,20 @@ O score considera volume, páginas, arquivos, tabelas, valores/comparadores crí
 | Mapa de evidências, SPEC, correção de SPEC | `evidence`, `spec`, `spec-correction` | DeepSeek V4 Flash |
 | Resumo, reparo de resumo | `summary`, `summary-repair` | DeepSeek V4 Pro |
 | Extração e geração de questões | `quiz-extract`, `quiz-generate` | DeepSeek V4 Flash/Pro |
-| Auditorias rotineiras | `spec-audit`, `summary-audit`, `quiz-audit` | Kimi K3 via OpenRouter, ou API direta |
+| Auditorias do fluxo legado e simulados | `spec-audit`, `summary-audit`, `quiz-audit` | Kimi K3 via OpenRouter, ou API direta |
 | Adjudicação difícil | `spec-audit-critical`, `summary-audit-critical`, `quiz-audit-critical` | GPT-5.6 Terra Pro via OpenRouter, ou API direta |
 
-O auditor primário é definido por `AI_PRIMARY_AUDITOR`. Com OpenRouter, Kimi K3 audita todos os casos normais e críticos. GPT-5.6 Terra Pro permanece desabilitado por padrão com `AI_ENABLE_GPT_AUDITOR=false`; quando essa opção for explicitamente ativada, ele só poderá atuar como adjudicador após falhas persistentes. Se nenhum auditor independente estiver disponível, resumos e simulados não são gerados.
+O auditor primário é definido por `AI_PRIMARY_AUDITOR` nos fluxos legados e de simulado. O resumo otimizado não exige Kimi: ele usa uma revisão humana curta para resolver somente as leituras visuais incertas antes da geração final.
 
 ## Pipeline de resumo
 
-1. Extrair texto e, quando necessário, transcrever páginas visuais/manuscritas.
-2. Construir mapa de evidências por página, separando fatos confirmados, incertezas e valores críticos.
-3. Gerar SPEC a partir do mapa.
-4. Auditar e corrigir a SPEC por até duas rodadas.
-5. Exigir decisão humana para manuscritos ou valores de alto risco não resolvidos.
-6. Gerar o resumo com citações de página.
-7. Auditar o resumo com provedor independente.
-8. Se houver reprovação, ressalva ou página sem cobertura, reparar e auditar novamente, por até duas rodadas.
-9. Publicar somente com status `APROVADO` e cobertura programática completa.
+1. Extrair texto localmente com PyMuPDF e tentar OCR local apenas nas páginas sem texto suficiente.
+2. Enviar ao GLM somente as páginas visuais selecionadas e pedir a posição normalizada de cada leitura incerta.
+3. Gerar uma SPEC concisa com DeepSeek Flash.
+4. Pausar o job para o usuário revisar a SPEC e confirmar, corrigir ou ignorar cada dúvida diretamente sobre o trecho do PDF.
+5. Gerar o resumo uma única vez com DeepSeek Pro, aplicando as decisões humanas e exigindo citações de página.
+
+O Kimi não participa automaticamente deste fluxo. Isso elimina a chamada de auditoria visual que mais elevava o custo, sem transformar uma leitura incerta em fato silenciosamente.
 
 ## Pipeline de simulado
 
@@ -66,6 +64,7 @@ O auditor primário é definido por `AI_PRIMARY_AUDITOR`. Com OpenRouter, Kimi K
 ```env
 DEEPSEEK_API_KEY=
 ZHIPU_API_KEY=
+# Opcional: usado apenas por fluxos com auditoria independente
 KIMI_API_KEY=
 OPENAI_API_KEY=
 OPENROUTER_API_KEY=
