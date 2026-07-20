@@ -432,7 +432,7 @@ app.get('/api/config', requireAuth, (_req, res) => {
   res.json({
     deepseekConfigured: Boolean(providers.deepseek.envKey),
     zhipuConfigured: Boolean(providers.zhipu.envKey),
-    kimiConfigured: Boolean(providers.kimi.envKey),
+    kimiConfigured: Boolean(providers.kimi.envKey || providers.openrouter.envKey),
     auditorConfigured: Boolean(auditor),
     auditorProvider: auditor?.providerName || null,
     gptAuditorEnabled,

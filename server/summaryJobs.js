@@ -15,14 +15,25 @@ const MAX_FILES = 5;
 const JOB_TTL_MS = 2 * 60 * 60 * 1000;
 const PYTHON_BIN = process.env.PYTHON_BIN || (process.platform === 'win32' ? 'python' : 'python3');
 const WORKER_PATH = path.resolve('worker/process_pdf.py');
+const directKimiKey = process.env.KIMI_API_KEY || '';
+const openRouterKey = process.env.OPENROUTER_API_KEY || '';
+const kimiViaOpenRouter = !directKimiKey && Boolean(openRouterKey);
 const MODELS = {
   glm: process.env.ZHIPU_VISION_MODEL || 'glm-4.5v',
-  kimi: process.env.KIMI_VISION_MODEL || process.env.KIMI_AUDIT_MODEL || 'kimi-k3',
+  kimi: kimiViaOpenRouter
+    ? process.env.OPENROUTER_KIMI_VISION_MODEL || process.env.OPENROUTER_AUDIT_MODEL || 'moonshotai/kimi-k3'
+    : process.env.KIMI_VISION_MODEL || process.env.KIMI_AUDIT_MODEL || 'kimi-k3',
   deepseek: process.env.DEEPSEEK_SUMMARY_MODEL || process.env.DEEPSEEK_PRO_MODEL || 'deepseek-v4-pro',
 };
 const PROVIDERS = {
   glm: { url: 'https://api.z.ai/api/paas/v4', key: process.env.ZHIPU_API_KEY || '' },
-  kimi: { url: 'https://api.moonshot.ai/v1', key: process.env.KIMI_API_KEY || '' },
+  kimi: kimiViaOpenRouter
+    ? {
+        url: 'https://openrouter.ai/api/v1',
+        key: openRouterKey,
+        openRouter: true,
+      }
+    : { url: 'https://api.moonshot.ai/v1', key: directKimiKey },
   deepseek: { url: 'https://api.deepseek.com', key: process.env.DEEPSEEK_API_KEY || '' },
 };
 
@@ -73,7 +84,7 @@ async function chat(providerName, model, messages, maxTokens) {
   if (!provider?.key) throw new Error(`Chave não configurada para ${providerName}.`);
 
   const body = { model, messages, stream: false };
-  if (providerName === 'kimi') {
+  if (providerName === 'kimi' && !provider.openRouter) {
     body.max_completion_tokens = maxTokens;
     body.reasoning_effort = 'medium';
   } else {
@@ -87,7 +98,14 @@ async function chat(providerName, model, messages, maxTokens) {
   try {
     const response = await fetch(`${provider.url}/chat/completions`, {
       method: 'POST',
-      headers: { Authorization: `Bearer ${provider.key}`, 'Content-Type': 'application/json' },
+      headers: {
+        Authorization: `Bearer ${provider.key}`,
+        'Content-Type': 'application/json',
+        ...(provider.openRouter ? {
+          'HTTP-Referer': process.env.OPENROUTER_SITE_URL || 'https://resumex.app',
+          'X-Title': process.env.OPENROUTER_APP_TITLE || 'ResumeX',
+        } : {}),
+      },
       body: JSON.stringify(body),
       signal: controller.signal,
     });
@@ -321,7 +339,7 @@ router.post('/', async (req, res) => {
     return;
   }
   if (preferences.readHandwriting && (!PROVIDERS.glm.key || !PROVIDERS.kimi.key)) {
-    res.status(503).json({ error: { message: 'ZHIPU_API_KEY e KIMI_API_KEY são necessárias para a leitura visual.' } });
+    res.status(503).json({ error: { message: 'A leitura visual exige ZHIPU_API_KEY e uma chave Kimi direta ou OPENROUTER_API_KEY.' } });
     return;
   }
 
