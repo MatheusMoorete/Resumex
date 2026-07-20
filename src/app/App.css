@@ -6500,7 +6500,8 @@ select.input option {
   font: 600 .55rem/1 var(--font-mono);
 }
 .side-menu--fichario .side-menu-nav button:nth-child(1)::after { content: '01'; }
-.side-menu--fichario .side-menu-nav .side-menu-sign-out::after { content: '02'; }
+.side-menu--fichario .side-menu-nav .side-menu-how-it-works::after { content: '02'; }
+.side-menu--fichario .side-menu-nav .side-menu-sign-out::after { content: '03'; }
 .side-menu--fichario .side-menu-nav button:hover,
 .side-menu--fichario .side-menu-nav button:focus-visible {
   color: var(--menu-ink);

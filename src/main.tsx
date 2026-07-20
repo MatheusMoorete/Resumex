@@ -1,5 +1,6 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
+import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 import App from './app/App';
 import './app/App.css';
 import { authService } from './features/auth/services/authService';
@@ -24,10 +25,18 @@ function MissingAuthConfig() {
   );
 }
 
-const isLandingPage = (window.location.pathname.replace(/\/$/, '') || '/') === '/';
-
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    {isLandingPage ? <LandingPage /> : authService.isConfigured ? <App /> : <MissingAuthConfig />}
+    <BrowserRouter>
+      <Routes>
+        <Route path="/" element={<LandingPage />} />
+        <Route path="/como-funciona" element={<LandingPage />} />
+        <Route path="/medicina" element={<LandingPage />} />
+        <Route path="/recursos" element={<LandingPage />} />
+        <Route path="/planos" element={<LandingPage />} />
+        <Route path="/app/*" element={authService.isConfigured ? <App /> : <MissingAuthConfig />} />
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+    </BrowserRouter>
   </StrictMode>,
 );

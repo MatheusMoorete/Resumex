@@ -2,50 +2,43 @@ import { Check, Circle } from 'lucide-react';
 import NotebookLoadingAnimation from '../../loading/components/NotebookLoadingAnimation';
 
 const STEPS = [
-  'Gerando o resumo a partir do plano aprovado',
-  'Auditando fidelidade, valores e referências',
+  { stages: ['uploading', 'queued', 'extracting'], label: 'Extraindo o PDF com PyMuPDF' },
+  { stages: ['vision_glm', 'vision_kimi'], label: 'Lendo somente imagens e manuscritos necessários' },
+  { stages: ['summarizing', 'completed'], label: 'Gerando uma versão final com o DeepSeek' },
 ];
 
-export default function ProcessingView({ isAuditing = false }) {
-  const activeStep = isAuditing ? 1 : 0;
+export default function ProcessingView({ stage = 'queued', progress = 0 }) {
+  const activeStep = Math.max(0, STEPS.findIndex((step) => step.stages.includes(stage)));
 
   return (
     <div className="processing-section summary-processing-section">
-      <span className="processing-kicker">RESUMO / ETAPA FINAL</span>
-      <NotebookLoadingAnimation duration={isAuditing ? 1 : .78} />
+      <span className="processing-kicker">RESUMO / FLUXO OTIMIZADO</span>
+      <NotebookLoadingAnimation duration={.78} />
 
       <div className="processing-text" role="status" aria-live="polite">
-        <h3>{isAuditing ? 'Conferindo o resumo' : 'Escrevendo seu resumo'}</h3>
-        <p>
-          {isAuditing 
-            ? 'Um segundo modelo está revisando fidelidade, valores e referências antes da entrega.'
-            : 'O conteúdo está sendo organizado conforme o plano que você acabou de aprovar.'
-          }
-        </p>
+        <h3>Preparando seu resumo</h3>
+        <p>O texto é extraído localmente; a IA visual recebe apenas as páginas que precisam dela.</p>
       </div>
+
+      <div className="upload-progress-bar" role="progressbar" aria-label="Progresso do resumo" aria-valuemin={0} aria-valuemax={100} aria-valuenow={progress}>
+        <div className="upload-progress-fill" style={{ width: `${progress}%` }} />
+      </div>
+      <span>{progress}% concluído</span>
 
       <div className="processing-steps">
         {STEPS.map((step, index) => {
-          let stepStatus = 'pending';
-          if (index < activeStep) stepStatus = 'done';
-          else if (index === activeStep) stepStatus = 'active';
-
+          const status = index < activeStep ? 'done' : index === activeStep ? 'active' : 'pending';
           return (
-            <div
-              key={index}
-              className={`processing-step ${stepStatus}`}
-            >
+            <div key={step.label} className={`processing-step ${status}`}>
               <span className="processing-step-icon">
-                {stepStatus === 'done'
-                  ? <Check aria-hidden="true" />
-                  : <Circle fill={stepStatus === 'active' ? 'currentColor' : 'none'} aria-hidden="true" />}
+                {status === 'done' ? <Check aria-hidden="true" /> : <Circle fill={status === 'active' ? 'currentColor' : 'none'} aria-hidden="true" />}
               </span>
-              <span>{step}</span>
+              <span>{step.label}</span>
             </div>
           );
         })}
       </div>
-      <p className="processing-note">Mantenha esta aba aberta. O resultado aparecerá automaticamente quando estiver pronto.</p>
+      <p className="processing-note">Mantenha esta aba aberta. O resultado aparecerá automaticamente.</p>
     </div>
   );
 }

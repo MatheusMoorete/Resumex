@@ -4,6 +4,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createAuthProvider } from './auth/authProvider.js';
+import summaryJobsRouter from './summaryJobs.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -58,6 +59,8 @@ app.use((req, res, next) => {
   res.setHeader('X-Frame-Options', 'DENY');
   res.setHeader('Referrer-Policy', 'same-origin');
   res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+  if (req.path.startsWith('/api/')) res.setHeader('Cache-Control', 'no-store');
+  if (isProduction) res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
   next();
 });
 
@@ -78,8 +81,7 @@ function isLocalAddress(value) {
 }
 
 function isLocalRequest(req) {
-  const host = String(req.get('host') || '').split(':')[0].toLowerCase();
-  return isLocalAddress(host) || isLocalAddress(req.socket.remoteAddress);
+  return isLocalAddress(req.socket.remoteAddress);
 }
 
 function canUseLocalE2EMock(req) {
@@ -123,6 +125,7 @@ async function getAuthenticatedUser(req) {
 async function requireAuth(req, res, next) {
   try {
     if (e2eMockAuthEnabled && canUseLocalE2EMock(req)) {
+      req.authUser = { id: 'e2e-user', email: 'e2e@localhost' };
       next();
       return;
     }
@@ -143,6 +146,7 @@ async function requireAuth(req, res, next) {
       }
     }
 
+    req.authUser = user;
     next();
   } catch (error) {
     next(error);
@@ -428,6 +432,7 @@ app.get('/api/config', requireAuth, (_req, res) => {
   res.json({
     deepseekConfigured: Boolean(providers.deepseek.envKey),
     zhipuConfigured: Boolean(providers.zhipu.envKey),
+    kimiConfigured: Boolean(providers.kimi.envKey),
     auditorConfigured: Boolean(auditor),
     auditorProvider: auditor?.providerName || null,
     gptAuditorEnabled,
@@ -471,6 +476,13 @@ app.get('/api/config', requireAuth, (_req, res) => {
     notionConfigured: Boolean(notionApiKey && notionParentPageId),
   });
 });
+
+app.use(
+  '/api/summary/jobs',
+  requireAuth,
+  rateLimit({ windowMs: 60 * 60 * 1000, max: 1000, name: 'summary-jobs' }),
+  summaryJobsRouter
+);
 
 function normalizeNotionPageId(pageId) {
   const cleaned = String(pageId || '').replace(/-/g, '').trim();
@@ -996,9 +1008,17 @@ app.post(
   const upstreamPath = Array.isArray(req.params.path)
     ? req.params.path.join('/')
     : req.params.path;
+  if (upstreamPath !== 'chat/completions') {
+    res.status(404).json({ error: { message: 'Provider endpoint not allowed.' } });
+    return;
+  }
   const upstreamUrl = `${provider.baseUrl}/${upstreamPath}`;
   const providerAuth = req.get('x-provider-authorization');
-  const authorization = providerAuth || (provider.envKey ? `Bearer ${provider.envKey}` : '');
+  const authorization = providerAuth?.startsWith('Bearer ')
+    ? providerAuth
+    : provider.envKey
+      ? `Bearer ${provider.envKey}`
+      : '';
 
   if (!authorization) {
     res.status(401).json({ error: { message: `Missing API key for ${req.params.provider}.` } });

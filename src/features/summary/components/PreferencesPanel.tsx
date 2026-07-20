@@ -61,11 +61,9 @@ function parsePageRanges(value: string, totalPages: number) {
 
 export default function PreferencesPanel({
   fileData,
-  deepseekKey,
-  zhipuKey,
   deepseekAvailable,
   zhipuAvailable,
-  onOpenApiKeyModal,
+  kimiAvailable,
   onContinue,
   onBack,
 }) {
@@ -106,8 +104,9 @@ export default function PreferencesPanel({
 
   const getRequiredKeyMissing = () => {
     const missing = [];
-    if (!(zhipuAvailable ?? !!zhipuKey)) missing.push('Zhipu AI');
-    if (!(deepseekAvailable ?? !!deepseekKey)) missing.push('DeepSeek');
+    if (!deepseekAvailable) missing.push('DeepSeek');
+    if (readHandwriting && !zhipuAvailable) missing.push('Zhipu AI');
+    if (readHandwriting && !kimiAvailable) missing.push('Kimi');
     return missing.length > 0 ? missing.join(' e ') : null;
   };
 
@@ -135,9 +134,9 @@ export default function PreferencesPanel({
         <header className="prefs-page-header">
           <span>RESUMO / CONFIGURAÇÃO</span>
           <h1>Como este material deve ser organizado?</h1>
-          <p>Defina apenas o necessário. Você poderá revisar a estrutura antes de gerar o resumo.</p>
+          <p>Defina apenas o necessário. O resumo será gerado em um único fluxo otimizado.</p>
           <div className="prefs-progress" aria-label="Etapa 1 de 2: configurar resumo">
-            <strong>01</strong><span>Configurar</span><i /><strong>02</strong><span>Revisar plano</span>
+            <strong>01</strong><span>Configurar</span><i /><strong>02</strong><span>Gerar resumo</span>
           </div>
         </header>
 
@@ -310,10 +309,7 @@ export default function PreferencesPanel({
 
         {isKeyMissing && (
           <div className="upload-error prefs-key-warning">
-            A chave de API do {missingKeyName} não está configurada.{' '}
-            <button onClick={onOpenApiKeyModal}>
-              Configurar chave
-            </button>
+            A chave de API do {missingKeyName} não está configurada no servidor.
           </div>
         )}
 
@@ -324,7 +320,7 @@ export default function PreferencesPanel({
         )}
 
         <div className="prefs-actions compact">
-          <span>Próxima etapa: revisar a estrutura sugerida</span>
+          <span>Próxima etapa: extrair o PDF e gerar o resumo</span>
           <button className="btn btn-secondary" onClick={onBack}>
             Voltar
           </button>
@@ -334,7 +330,7 @@ export default function PreferencesPanel({
             disabled={isKeyMissing || hasNoFormats || (handwritingMode === 'manual' && hasInvalidManualPages)}
             id="continue-to-spec"
           >
-            Gerar plano · {pagesSentToGlm.length} páginas com visão
+            Gerar resumo · {pagesSentToGlm.length} páginas com visão
           </button>
         </div>
       </div>

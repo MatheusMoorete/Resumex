@@ -1,19 +1,10 @@
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import rehypeRaw from 'rehype-raw';
 
 type MarkdownPreviewProps = {
   content: string;
   onPageClick?: (page: number, source: string) => void;
 };
-
-function escapeHtmlAttr(value) {
-  return String(value)
-    .replace(/&/g, '&amp;')
-    .replace(/"/g, '&quot;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;');
-}
 
 function cleanSourceText(value) {
   return value
@@ -31,8 +22,8 @@ function getReferenceContext(markdown, offset) {
 }
 
 /**
- * Pre-processes markdown to convert page references (p. X) into clickable buttons.
- * These buttons will be rendered as HTML via rehype-raw.
+ * Pre-processes page references as internal links. React renders the button,
+ * so generated Markdown never needs permission to inject raw HTML.
  */
 function processPageRefs(markdown) {
   if (!markdown) return markdown;
@@ -44,7 +35,7 @@ function processPageRefs(markdown) {
       const pageNum = parseInt(page1, 10);
       const displayLabel = page2 ? `p. ${page1}-${page2}` : `p. ${page1}`;
       const sourceText = getReferenceContext(fullText, offset);
-      return `<button class="page-ref" data-page="${pageNum}" data-source="${escapeHtmlAttr(sourceText)}" title="Ir para a página ${pageNum} no PDF">${displayLabel}</button>`;
+      return `[${displayLabel}](#page=${pageNum}&source=${encodeURIComponent(sourceText)})`;
     }
   );
 }
@@ -60,20 +51,31 @@ export default function MarkdownPreview({ content, onPageClick }: MarkdownPrevie
 
   const processedContent = onPageClick ? processPageRefs(content) : content;
 
-  const handleClick = (e) => {
-    // Event delegation: check if a .page-ref button was clicked
-    const pageRef = e.target.closest('.page-ref');
-    if (pageRef && onPageClick) {
-      const page = parseInt(pageRef.dataset.page, 10);
-      if (!isNaN(page)) {
-        onPageClick(page, pageRef.dataset.source || '');
-      }
-    }
-  };
-
   return (
-    <div className="markdown-body" onClick={handleClick}>
-      <Markdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]}>
+    <div className="markdown-body">
+      <Markdown
+        remarkPlugins={[remarkGfm]}
+        components={{
+          a({ href, children, ...props }) {
+            if (href?.startsWith('#page=') && onPageClick) {
+              const params = new URLSearchParams(href.slice(1));
+              const page = Number(params.get('page'));
+              if (!Number.isInteger(page) || page < 1) return <>{children}</>;
+              return (
+                <button
+                  type="button"
+                  className="page-ref"
+                  title={`Ir para a página ${page} no PDF`}
+                  onClick={() => onPageClick(page, params.get('source') || '')}
+                >
+                  {children}
+                </button>
+              );
+            }
+            return <a href={href} target="_blank" rel="noopener noreferrer" {...props}>{children}</a>;
+          },
+        }}
+      >
         {processedContent}
       </Markdown>
     </div>

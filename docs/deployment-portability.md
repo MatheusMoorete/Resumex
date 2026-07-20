@@ -3,7 +3,7 @@
 O ResumeX usa a mesma imagem Docker em qualquer provedor. O codigo da
 aplicacao nao depende de Render ou Hostinger:
 
-- `Dockerfile`: imagem portavel com Node, Python, PyMuPDF e Pillow.
+- `Dockerfile`: imagem portavel com Node, Python e PyMuPDF.
 - `render.yaml`: adaptador exclusivo do Render.
 - `compose.yaml`: adaptador para VPS, incluindo Hostinger.
 - `deploy/Caddyfile`: HTTPS e proxy reverso na VPS.

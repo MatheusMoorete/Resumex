@@ -1,5 +1,13 @@
 import { useEffect } from 'react';
+import { Link, useLocation } from 'react-router-dom';
 import './LandingPage.css';
+
+const sectionByRoute: Record<string, string> = {
+  '/como-funciona': 'como-funciona',
+  '/medicina': 'contexto',
+  '/recursos': 'recursos',
+  '/planos': 'planos',
+};
 
 const tools = [
   ['01', 'Resumo', 'Organiza o conteúdo com estrutura clínica e referência por página.'],
@@ -30,6 +38,8 @@ const plans = [
 ];
 
 export default function LandingPage() {
+  const { pathname } = useLocation();
+
   useEffect(() => {
     document.title = 'Resumex — contexto médico para o seu estudo';
 
@@ -51,15 +61,24 @@ export default function LandingPage() {
     return () => observer.disconnect();
   }, []);
 
+  useEffect(() => {
+    const sectionId = sectionByRoute[pathname];
+    const behavior = window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth';
+    window.requestAnimationFrame(() => {
+      if (sectionId) document.getElementById(sectionId)?.scrollIntoView({ behavior });
+      else window.scrollTo({ top: 0, behavior });
+    });
+  }, [pathname]);
+
   return (
     <div className="lp-page">
       <header className="lp-header">
-        <a className="lp-logo" href="/" aria-label="Resumex, página inicial">resumex<span>!</span></a>
+        <Link className="lp-logo" to="/" aria-label="Resumex, página inicial">resumex<span>!</span></Link>
         <nav aria-label="Navegação principal">
-          <a href="#como-funciona">Como funciona</a>
-          <a href="#contexto">Por que é diferente</a>
-          <a href="#planos">Planos</a>
-          <a className="lp-login-link" href="#planos">Assinar <span>→</span></a>
+          <Link to="/como-funciona">Como funciona</Link>
+          <Link to="/medicina">Por que é diferente</Link>
+          <Link to="/planos">Planos</Link>
+          <Link className="lp-login-link" to="/planos">Assinar <span>→</span></Link>
         </nav>
       </header>
 
@@ -72,8 +91,8 @@ export default function LandingPage() {
               O Resumex transforma seus PDFs em materiais de estudo direcionados ao contexto médico — com estrutura, referências e ferramentas para revisar.
             </p>
             <div className="lp-hero-actions">
-              <a className="lp-primary-action" href="/app">Abrir minha mesa <span>→</span></a>
-              <a className="lp-text-link" href="#como-funciona">Entender o processo ↓</a>
+              <Link className="lp-primary-action" to="/app">Abrir minha mesa <span>→</span></Link>
+              <Link className="lp-text-link" to="/como-funciona">Entender o processo ↓</Link>
             </div>
           </div>
 
@@ -145,7 +164,7 @@ export default function LandingPage() {
           </dl>
         </section>
 
-        <section className="lp-tools" aria-labelledby="tools-title" data-reveal>
+        <section className="lp-tools" id="recursos" aria-labelledby="tools-title" data-reveal>
           <header className="lp-section-heading">
             <span>UMA BASE / TRÊS FORMAS DE ESTUDAR</span>
             <h2 id="tools-title">O material muda de forma.<br />O contexto permanece.</h2>
@@ -189,12 +208,12 @@ export default function LandingPage() {
           <span>OTIMIZE O PROCESSO, NÃO O APRENDIZADO.</span>
           <h2>Seu tempo deve ir para entender medicina.</h2>
           <p>Deixe a organização do material com o Resumex.</p>
-          <a className="lp-primary-action" href="/app">Entrar no Resumex <span>→</span></a>
+          <Link className="lp-primary-action" to="/planos">Assinar <span>→</span></Link>
         </section>
       </main>
 
       <footer className="lp-footer">
-        <a className="lp-logo" href="/">resumex<span>!</span></a>
+        <Link className="lp-logo" to="/">resumex<span>!</span></Link>
         <p>Organização e revisão para estudo médico.</p>
         <span>© 2026</span>
       </footer>

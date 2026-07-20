@@ -1,5 +1,6 @@
 import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { ArrowLeft, Camera, CircleX, FileText, RefreshCw } from 'lucide-react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import type { AuthSession } from '../features/auth/domain/auth';
 import Header from '../shared/components/Header';
 import ApiKeyModal from '../features/auth/components/ApiKeyModal';
@@ -11,6 +12,7 @@ import PreferencesPanel from '../features/summary/components/PreferencesPanel';
 import SpecEditor from '../features/summary/components/SpecEditor';
 import ProcessingView from '../features/summary/components/ProcessingView';
 import ResultView from '../features/summary/components/ResultView';
+import { runSummaryJob } from '../features/summary/services/summaryJobApi';
 import QuizView from '../features/quiz/components/QuizView';
 import QuizProcessingTimeline from '../features/quiz/components/QuizProcessingTimeline';
 import { generateSummary } from '../features/summary/services/deepseekApi';
@@ -60,6 +62,45 @@ const isE2EMockMode = import.meta.env.DEV
 const canUseLocalTestFlow = import.meta.env.DEV && isLocalBrowserHost();
 
 const waitForLocalTest = (duration: number) => new Promise((resolve) => window.setTimeout(resolve, duration));
+
+function getSessionApiKey(key: string) {
+  localStorage.removeItem(key);
+  return sessionStorage.getItem(key) || '';
+}
+
+const APP_STATE_ROUTES = {
+  upload: '/app',
+  preferences: '/app/resumo/configurar',
+  'rendering-pdf': '/app/resumo/preparando',
+  'transcribing-pdf': '/app/resumo/lendo',
+  'generating-spec': '/app/resumo/analisando',
+  'edit-spec': '/app/resumo/plano',
+  processing: '/app/resumo/gerando',
+  result: '/app/resumo/resultado',
+  'quiz-processing': '/app/simulado/gerando',
+  'quiz-result': '/app/simulado/resultado',
+  error: '/app/erro',
+} as const;
+
+type AppState = keyof typeof APP_STATE_ROUTES;
+type HomeMode = 'summary' | 'quiz' | 'flashcards';
+
+const HOME_MODE_ROUTES: Record<HomeMode, string> = {
+  summary: '/app/resumo',
+  quiz: '/app/simulado',
+  flashcards: '/app/flashcards',
+};
+
+function getRouteState(pathname: string): AppState | null {
+  const path = pathname.replace(/\/+$/, '') || '/';
+  if (path === '/app' || Object.values(HOME_MODE_ROUTES).includes(path)) return 'upload';
+  return (Object.entries(APP_STATE_ROUTES).find(([, route]) => route === path)?.[0] as AppState | undefined) || null;
+}
+
+function getRouteMode(pathname: string): HomeMode {
+  const path = pathname.replace(/\/+$/, '') || '/';
+  return (Object.entries(HOME_MODE_ROUTES).find(([, route]) => route === path)?.[0] as HomeMode | undefined) || 'summary';
+}
 
 /**
  * App States:
@@ -360,6 +401,8 @@ async function renderSummaryCorpusPages(fileInfo, globalPages, options) {
 }
 
 export default function App() {
+  const location = useLocation();
+  const navigate = useNavigate();
   const [session, setSession] = useState<AuthSession | null>(null);
   const [isLoaded, setIsLoaded] = useState(false);
   const isSignedIn = Boolean(session);
@@ -382,16 +425,21 @@ export default function App() {
 
   // Core state - DeepSeek generates text; GLM transcribes visual/handwritten pages.
   // Local keys are optional overrides. Server-side env keys are preferred.
-  const [appState, setAppState] = useState('upload');
+  const [appState, setAppStateValue] = useState<AppState>(() => getRouteState(location.pathname) || 'upload');
+  const setAppState = useCallback((nextState: AppState) => {
+    setAppStateValue(nextState);
+    navigate(APP_STATE_ROUTES[nextState], { replace: true });
+  }, [navigate]);
   const [deepseekKey, setDeepseekKey] = useState(() => 
-    localStorage.getItem('resumex_api_key') || ''
+    getSessionApiKey('resumex_api_key')
   );
   const [zhipuKey, setZhipuKey] = useState(() => 
-    localStorage.getItem('resumex_zhipu_key') || ''
+    getSessionApiKey('resumex_zhipu_key')
   );
   const [serverConfig, setServerConfig] = useState({
     deepseekConfigured: false,
     zhipuConfigured: false,
+    kimiConfigured: false,
     auditorConfigured: false,
     auditorProvider: null as string | null,
     loaded: false,
@@ -413,6 +461,7 @@ export default function App() {
   const [riskDecisions, setRiskDecisions] = useState({});
   const [summary, setSummary] = useState('');
   const [summaryLog, setSummaryLog] = useState('');
+  const [summaryJob, setSummaryJob] = useState({ stage: 'queued', progress: 0 });
   const [isAuditing, setIsAuditing] = useState(false);
   const [missingPages, setMissingPages] = useState([]);
   const [coverageReinforcementInstruction, setCoverageReinforcementInstruction] = useState('');
@@ -423,12 +472,40 @@ export default function App() {
   const [quizProcessingMessage, setQuizProcessingMessage] = useState('');
   const [quizProcessingStage, setQuizProcessingStage] = useState('files');
   const [flashcardDrafts, setFlashcardDrafts] = useState([]);
-  const [homeInitialMode, setHomeInitialMode] = useState<'summary' | 'quiz' | 'flashcards'>('summary');
+  const [homeInitialMode, setHomeInitialMode] = useState<HomeMode>(() => getRouteMode(location.pathname));
   const [hasWorkspaceActivity, setHasWorkspaceActivity] = useState(false);
   const [workspaceResetKey, setWorkspaceResetKey] = useState(0);
   const [showHomeConfirmation, setShowHomeConfirmation] = useState(false);
+  const [pendingNavigation, setPendingNavigation] = useState<string | null>(null);
   const [error, setError] = useState('');
   const [isLocalTestFlow, setIsLocalTestFlow] = useState(false);
+
+  const openHomeMode = useCallback((mode: HomeMode) => {
+    setAppStateValue('upload');
+    setHomeInitialMode(mode);
+    navigate(HOME_MODE_ROUTES[mode]);
+  }, [navigate]);
+
+  useEffect(() => {
+    const routeState = getRouteState(location.pathname);
+    if (!routeState) {
+      navigate('/app', { replace: true });
+      return;
+    }
+
+    const needsSummaryData = ['preferences', 'rendering-pdf', 'transcribing-pdf', 'generating-spec', 'edit-spec', 'processing', 'result'].includes(routeState);
+    const needsQuizData = routeState === 'quiz-processing' || routeState === 'quiz-result';
+
+    if ((!isE2EMockMode && needsSummaryData && !fileData) || (needsQuizData && !quizFiles.length)) {
+      setAppStateValue('upload');
+      setHomeInitialMode(needsQuizData ? 'quiz' : 'summary');
+      navigate(needsQuizData ? HOME_MODE_ROUTES.quiz : '/app', { replace: true });
+      return;
+    }
+
+    setAppStateValue(routeState);
+    if (routeState === 'upload') setHomeInitialMode(getRouteMode(location.pathname));
+  }, [fileData, location.pathname, navigate, quizFiles.length]);
 
   // Abort controller
   const abortControllerRef = useRef(null);
@@ -449,6 +526,7 @@ export default function App() {
       setServerConfig({
         deepseekConfigured: true,
         zhipuConfigured: true,
+        kimiConfigured: true,
         auditorConfigured: true,
         auditorProvider: 'mock',
         loaded: true,
@@ -494,6 +572,7 @@ export default function App() {
         setServerConfig({
           deepseekConfigured: Boolean(config.deepseekConfigured),
           zhipuConfigured: Boolean(config.zhipuConfigured),
+          kimiConfigured: Boolean(config.kimiConfigured),
           auditorConfigured: Boolean(config.auditorConfigured),
           auditorProvider: config.auditorProvider || null,
           loaded: true,
@@ -543,6 +622,7 @@ export default function App() {
     setServerConfig({
       deepseekConfigured: Boolean(config.deepseekConfigured),
       zhipuConfigured: Boolean(config.zhipuConfigured),
+      kimiConfigured: Boolean(config.kimiConfigured),
       auditorConfigured: Boolean(config.auditorConfigured),
       auditorProvider: config.auditorProvider || null,
       loaded: true,
@@ -553,8 +633,8 @@ export default function App() {
   const handleSaveApiKey = useCallback((keys) => {
     setDeepseekKey(keys.deepseek);
     setZhipuKey(keys.zhipu);
-    localStorage.setItem('resumex_api_key', keys.deepseek);
-    localStorage.setItem('resumex_zhipu_key', keys.zhipu);
+    sessionStorage.setItem('resumex_api_key', keys.deepseek);
+    sessionStorage.setItem('resumex_zhipu_key', keys.zhipu);
     setShowApiKeyModal(false);
   }, []);
 
@@ -594,15 +674,13 @@ export default function App() {
     setQuizProcessingStage('files');
     setError('');
     setIsLocalTestFlow(false);
-    setHomeInitialMode('quiz');
-    setAppState('upload');
-  }, []);
+    openHomeMode('quiz');
+  }, [openHomeMode]);
 
   const handleCreateFlashcardsFromSummary = useCallback(async () => {
     if (isLocalTestFlow) {
       setFlashcardDrafts(mockFlashcardDrafts);
-      setHomeInitialMode('flashcards');
-      setAppState('upload');
+      openHomeMode('flashcards');
       return;
     }
 
@@ -620,9 +698,8 @@ export default function App() {
     });
     if (!drafts.length) throw new Error('O resumo não gerou cartões válidos.');
     setFlashcardDrafts(drafts);
-    setHomeInitialMode('flashcards');
-    setAppState('upload');
-  }, [deepseekKey, hasDeepseekAccess, isLocalTestFlow, summary]);
+    openHomeMode('flashcards');
+  }, [deepseekKey, hasDeepseekAccess, isLocalTestFlow, openHomeMode, summary]);
 
   const handleGenerateQuiz = useCallback(async (files, options: any = {}) => {
     if (!hasDeepseekAccess) {
@@ -780,9 +857,8 @@ export default function App() {
     setQuizProcessingStage('files');
     setFlashcardDrafts([]);
     setError('');
-    setHomeInitialMode('quiz');
-    setAppState('upload');
-  }, []);
+    openHomeMode('quiz');
+  }, [openHomeMode]);
 
   const runLocalSpecFlow = useCallback(async (prefs) => {
     const controller = new AbortController();
@@ -816,7 +892,7 @@ export default function App() {
     setAppState('edit-spec');
   }, [fileData]);
 
-  const handlePreferencesComplete = useCallback((prefs) => {
+  const handlePreferencesComplete = useCallback(async (prefs) => {
     setPreferences(prefs);
 
     if (isLocalTestFlow) {
@@ -824,18 +900,45 @@ export default function App() {
       return;
     }
 
-    if (!hasDeepseekAccess || !hasZhipuAccess) {
-      setShowApiKeyModal(true);
+    if (!serverConfig.deepseekConfigured) {
+      setError('Configure DEEPSEEK_API_KEY no servidor para gerar o resumo otimizado.');
+      setAppState('error');
       return;
     }
-    if (!hasIndependentAuditor) {
-      setError('Configure OPENROUTER_API_KEY, KIMI_API_KEY ou OPENAI_API_KEY no servidor para habilitar a auditoria independente do resumo.');
+    if (prefs.readHandwriting && (!serverConfig.zhipuConfigured || !serverConfig.kimiConfigured)) {
+      setError('Configure ZHIPU_API_KEY e KIMI_API_KEY no servidor para a leitura visual com correção de dúvidas.');
       setAppState('error');
       return;
     }
 
-    generateSpec(fileData, prefs);
-  }, [hasDeepseekAccess, hasIndependentAuditor, hasZhipuAccess, fileData, isLocalTestFlow, runLocalSpecFlow]);
+    const files = (fileData?.files || []).map((item) => item.file).filter(Boolean);
+    if (!files.length) return;
+
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+    setSummary('');
+    setSummaryLog('');
+    setSummaryJob({ stage: 'uploading', progress: 0 });
+    setError('');
+    setAppState('processing');
+
+    try {
+      const job = await runSummaryJob({
+        files,
+        preferences: prefs,
+        signal: controller.signal,
+        onProgress: setSummaryJob,
+      });
+      setSummary(job.summary || '');
+      setSummaryLog(job.metrics ? `## Processamento\n\n\`\`\`json\n${JSON.stringify(job.metrics, null, 2)}\n\`\`\`` : '');
+      setMissingPages([]);
+      setAppState('result');
+    } catch (jobError) {
+      if (jobError?.name === 'AbortError') return;
+      setError(jobError instanceof Error ? jobError.message : 'Erro ao gerar o resumo.');
+      setAppState('error');
+    }
+  }, [fileData, isLocalTestFlow, runLocalSpecFlow, serverConfig.deepseekConfigured, serverConfig.kimiConfigured, serverConfig.zhipuConfigured, setAppState]);
 
   // --- Generate SPEC (Step 1) ---
   const generateSpec = useCallback(async (data, prefs) => {
@@ -1343,8 +1446,8 @@ Você DEVE obrigatoriamente incluir e detalhar todas as informações, critério
   const handleSaveApiKeyAndContinue = useCallback((keys) => {
     setDeepseekKey(keys.deepseek);
     setZhipuKey(keys.zhipu);
-    localStorage.setItem('resumex_api_key', keys.deepseek);
-    localStorage.setItem('resumex_zhipu_key', keys.zhipu);
+    sessionStorage.setItem('resumex_api_key', keys.deepseek);
+    sessionStorage.setItem('resumex_zhipu_key', keys.zhipu);
     setShowApiKeyModal(false);
 
     if (fileData && preferences && (keys.deepseek || serverConfig.deepseekConfigured) && (keys.zhipu || serverConfig.zhipuConfigured)) {
@@ -1386,25 +1489,45 @@ Você DEVE obrigatoriamente incluir e detalhar todas as informações, critério
 
   const handleHeaderHome = useCallback(() => {
     if (appState !== 'upload' || hasWorkspaceActivity) {
+      setPendingNavigation(null);
       setShowHomeConfirmation(true);
+      return;
     }
-  }, [appState, hasWorkspaceActivity]);
+    handleNewSummary();
+  }, [appState, handleNewSummary, hasWorkspaceActivity]);
+
+  const handleHowItWorks = useCallback(() => {
+    if (appState !== 'upload' || hasWorkspaceActivity) {
+      setPendingNavigation('/como-funciona');
+      setShowHomeConfirmation(true);
+      return;
+    }
+    navigate('/como-funciona');
+  }, [appState, hasWorkspaceActivity, navigate]);
+
+  const closeHomeConfirmation = useCallback(() => {
+    setShowHomeConfirmation(false);
+    setPendingNavigation(null);
+  }, []);
 
   const confirmReturnHome = useCallback(() => {
+    const destination = pendingNavigation;
     setShowHomeConfirmation(false);
+    setPendingNavigation(null);
     handleNewSummary();
-  }, [handleNewSummary]);
+    if (destination) navigate(destination);
+  }, [handleNewSummary, navigate, pendingNavigation]);
 
   useEffect(() => {
     if (!showHomeConfirmation) return undefined;
 
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setShowHomeConfirmation(false);
+      if (event.key === 'Escape') closeHomeConfirmation();
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [showHomeConfirmation]);
+  }, [closeHomeConfirmation, showHomeConfirmation]);
 
   // --- Back to upload ---
   const handleBackToUpload = useCallback(() => {
@@ -1498,7 +1621,8 @@ Você DEVE obrigatoriamente incluir e detalhar todas as informações, critério
           userActions={session?.user ? (
             <AccountButton
               user={session.user}
-              onStudyCenter={handleNewSummary}
+              onStudyCenter={handleHeaderHome}
+              onHowItWorks={handleHowItWorks}
             />
           ) : null}
         />
@@ -1509,7 +1633,7 @@ Você DEVE obrigatoriamente incluir e detalhar todas as informações, critério
             onUploadComplete={handleUploadComplete}
             onStartLocalTest={canUseLocalTestFlow ? handleStartLocalTest : undefined}
             initialMode={homeInitialMode}
-            onModeChange={setHomeInitialMode}
+            onModeChange={openHomeMode}
             onActivityChange={setHasWorkspaceActivity}
             flashcardConfig={{ initialDrafts: flashcardDrafts }}
             quizConfig={{
@@ -1527,11 +1651,9 @@ Você DEVE obrigatoriamente incluir e detalhar todas as informações, critério
         {appState === 'preferences' && fileData && (
           <PreferencesPanel
             fileData={fileData}
-            deepseekKey={deepseekKey}
-            zhipuKey={zhipuKey}
-            deepseekAvailable={hasDeepseekAccess}
-            zhipuAvailable={hasZhipuAccess}
-            onOpenApiKeyModal={() => setShowApiKeyModal(true)}
+            deepseekAvailable={serverConfig.deepseekConfigured}
+            zhipuAvailable={serverConfig.zhipuConfigured}
+            kimiAvailable={serverConfig.kimiConfigured}
             onContinue={handlePreferencesComplete}
             onBack={handleBackToUpload}
           />
@@ -1610,7 +1732,7 @@ Você DEVE obrigatoriamente incluir e detalhar todas as informações, critério
         )}
 
         {appState === 'processing' && (
-          <ProcessingView isAuditing={isAuditing} />
+          <ProcessingView stage={summaryJob.stage} progress={summaryJob.progress} />
         )}
 
         {appState === 'quiz-processing' && (
@@ -1670,7 +1792,7 @@ Você DEVE obrigatoriamente incluir e detalhar todas as informações, critério
         <div
           className="home-confirmation-overlay"
           onMouseDown={(event) => {
-            if (event.target === event.currentTarget) setShowHomeConfirmation(false);
+            if (event.target === event.currentTarget) closeHomeConfirmation();
           }}
         >
           <section
@@ -1686,13 +1808,13 @@ Você DEVE obrigatoriamente incluir e detalhar todas as informações, critério
               <button
                 type="button"
                 className="btn btn-secondary"
-                onClick={() => setShowHomeConfirmation(false)}
+                onClick={closeHomeConfirmation}
                 autoFocus
               >
                 Continuar aqui
               </button>
               <button type="button" className="btn btn-primary" onClick={confirmReturnHome}>
-                Voltar para a home
+                {pendingNavigation ? 'Ir para Como funciona' : 'Voltar para a home'}
               </button>
             </div>
           </section>

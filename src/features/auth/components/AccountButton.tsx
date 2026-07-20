@@ -1,15 +1,16 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { BookOpen, LogOut, Menu, X } from 'lucide-react';
+import { BookOpen, CircleHelp, LogOut, Menu, X } from 'lucide-react';
 import type { AuthUser } from '../domain/auth';
 import { authService } from '../services/authService';
 
 type AccountButtonProps = {
   user: AuthUser;
   onStudyCenter?: () => void;
+  onHowItWorks?: () => void;
 };
 
-export default function AccountButton({ user, onStudyCenter }: AccountButtonProps) {
+export default function AccountButton({ user, onStudyCenter, onHowItWorks }: AccountButtonProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [isClosing, setIsClosing] = useState(false);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
@@ -91,6 +92,17 @@ export default function AccountButton({ user, onStudyCenter }: AccountButtonProp
               >
                 <BookOpen aria-hidden="true" />
                 Central de estudo
+              </button>
+              <button
+                className="side-menu-how-it-works"
+                type="button"
+                onClick={() => {
+                  onHowItWorks?.();
+                  closeMenu();
+                }}
+              >
+                <CircleHelp aria-hidden="true" />
+                Como funciona
               </button>
               <button className="side-menu-sign-out" type="button" onClick={() => void authService.signOut()}>
                 <LogOut aria-hidden="true" />

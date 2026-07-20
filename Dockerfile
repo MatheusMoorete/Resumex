@@ -38,6 +38,7 @@ RUN npm ci --omit=dev && npm cache clean --force
 
 COPY --from=build /app/dist ./dist
 COPY server ./server
+COPY worker ./worker
 COPY server.js ./server.js
 
 EXPOSE 10000
