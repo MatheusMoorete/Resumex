@@ -2,7 +2,7 @@ import { buildAuthHeaders } from '../../auth/services/authClient';
 import { assessCorpusComplexity } from '../../ai/services/aiOrchestrator';
 
 const API_URL = '/api/ai/chat/completions';
-const MAX_CONTEXT_CHARS = 320000;
+const MAX_CONTEXT_CHARS = 240000;
 const MAX_FILE_CHARS = 160000;
 const MAX_QUESTIONS_PER_CALL = 10;
 const MAX_CHUNK_CHARS = 8000;
@@ -10,6 +10,12 @@ const AUDIT_BATCH_SIZE = 12;
 const MIN_AUDIT_SCORE = 78;
 const FINAL_SIMILARITY_THRESHOLD = 0.58;
 const RELAXED_SIMILARITY_THRESHOLD = 0.72;
+
+let serverAiCaller = null;
+
+export function setQuizServerAiCaller(caller) {
+  serverAiCaller = caller;
+}
 
 const WINDOWS_1252_BYTE_BY_CODE_POINT = {
   0x20AC: 0x80,
@@ -408,7 +414,13 @@ function buildChunkContext(chunks, label = 'BLOCO') {
 
 function buildQuestionBankContext(files) {
   const questionFiles = files.filter((file) => file.kind === 'question_bank' || file.kind === 'mixed');
-  return compactContext(questionFiles.map((file, index) => buildFileContext(file, `BANCO DE QUESTOES ${index + 1}`)));
+  const perFileLimit = Math.min(
+    MAX_FILE_CHARS,
+    Math.max(8000, Math.floor((MAX_CONTEXT_CHARS - (questionFiles.length * 200)) / Math.max(1, questionFiles.length)))
+  );
+  return compactContext(questionFiles.map((file, index) => (
+    buildFileContext(file, `BANCO DE QUESTOES ${index + 1}`, perFileLimit)
+  )));
 }
 
 async function callDeepSeekJson({
@@ -420,6 +432,11 @@ async function callDeepSeekJson({
   maxTokens = 8192,
   temperature = 0.15,
 }) {
+  if (serverAiCaller) {
+    const content = await serverAiCaller({ system, user, signal, role, maxTokens, temperature });
+    return extractJsonObject(content);
+  }
+
   const headers = {
     'Content-Type': 'application/json',
     ...await buildAuthHeaders(),
@@ -495,8 +512,8 @@ function normalizeAuditItems(payload) {
   return items
     .map((item) => ({
       id: String(item.id || '').trim(),
-      approved: Boolean(item.approved),
-      score: Number(item.score) || 0,
+      approved: item.approved === true,
+      score: Math.max(0, Math.min(100, Number(item.score) || 0)),
       issue: cleanText(item.issue),
       topic: cleanText(item.topic),
     }))
@@ -894,19 +911,27 @@ function hasCriticalEvidenceToken(value) {
   return /\d|[<>=\u2265\u2264]|\b(?:mg|mcg|ml|mmhg|cm|mm|kg|h|min|seg)\b|%/i.test(String(value || ''));
 }
 
-function verifyQuestionEvidence(question, files) {
+export function verifyQuestionEvidence(question, files) {
   const quote = collapseEvidenceText(question.evidenceQuote);
   if (quote.length < 20) return { ...question, evidenceVerified: false };
 
   const requestedFile = normalizeText(question.sourceFile);
+  const requestedPage = Number(String(question.sourcePage || '').match(/\d+/)?.[0] || 0);
+  if (!requestedFile || !Number.isInteger(requestedPage) || requestedPage < 1) {
+    return { ...question, evidenceVerified: false };
+  }
   const matchingFiles = requestedFile
     ? files.filter((file) => {
-        const fileName = normalizeText(file.name);
-        return fileName.includes(requestedFile) || requestedFile.includes(fileName);
-      })
+      const fileName = normalizeText(file.name);
+      return fileName.includes(requestedFile) || requestedFile.includes(fileName);
+    })
     : [];
-  const candidates = matchingFiles.length ? matchingFiles : files;
-  const exactMatch = candidates.some((file) => collapseEvidenceText(file.text).includes(quote));
+  if (!matchingFiles.length) return { ...question, evidenceVerified: false };
+  const pageCandidates = matchingFiles
+    .map((file) => file.pageTexts?.[requestedPage - 1])
+    .filter(Boolean);
+  if (!pageCandidates.length) return { ...question, evidenceVerified: false };
+  const exactMatch = pageCandidates.some((text) => collapseEvidenceText(text).includes(quote));
 
   if (exactMatch) return { ...question, evidenceVerified: true };
   if (hasCriticalEvidenceToken(question.evidenceQuote)) {
@@ -914,13 +939,27 @@ function verifyQuestionEvidence(question, files) {
   }
 
   const normalizedQuote = normalizeText(question.evidenceQuote);
-  const normalizedMatch = normalizedQuote.length >= 20 && candidates.some((file) => (
-    normalizeText(file.text).includes(normalizedQuote)
-  ));
+  const normalizedMatch = normalizedQuote.length >= 20
+    && pageCandidates.some((text) => normalizeText(text).includes(normalizedQuote));
   return { ...question, evidenceVerified: normalizedMatch };
 }
 
 async function auditQuestionBatch({ apiKey, questions, signal, auditRole = 'quiz-audit' }) {
+  const verifiableQuestions = questions.filter((q) => q.evidenceVerified !== false);
+  const unverifiedQuestions = questions.filter((q) => q.evidenceVerified === false);
+
+  const unverifiedResults = unverifiedQuestions.map((q) => ({
+    id: String(q.id || '').trim(),
+    approved: false,
+    score: 0,
+    issue: 'Evidência literal não localizada no corpus original.',
+    topic: cleanText(q.topic),
+  }));
+
+  if (verifiableQuestions.length === 0) {
+    return unverifiedResults;
+  }
+
   const payload = await callDeepSeekJson({
     apiKey,
     signal,
@@ -975,10 +1014,11 @@ Responda somente JSON valido.`,
 
 ## QUESTOES
 
-${JSON.stringify(buildAuditQuestionPayload(questions))}`,
+${JSON.stringify(buildAuditQuestionPayload(verifiableQuestions))}`,
   });
 
-  return normalizeAuditItems(payload);
+  const verifiedResults = normalizeAuditItems(payload);
+  return [...verifiedResults, ...unverifiedResults];
 }
 
 function getQuestionTopic(question) {
@@ -1155,8 +1195,9 @@ export async function buildQuizFromCorpus({
   const contentChunks = buildContentIndex(classifiedFiles);
   const theoryContext = buildTheoryContext(classifiedFiles);
   const shouldExtractQuestions = questionMode === 'mixed';
-  const targetCandidateCount = Math.ceil(questionCount * 2.2);
-  const extractedTarget = shouldExtractQuestions ? Math.ceil(targetCandidateCount * 0.7) : 0;
+  const candidateMultiplier = orchestration.tier === 'simple' ? 1.5 : orchestration.tier === 'high' ? 2 : 1.8;
+  const targetCandidateCount = Math.ceil(questionCount * candidateMultiplier);
+  const extractedTarget = shouldExtractQuestions ? Math.ceil(questionCount * 0.6) : 0;
   const seedQuestions = dedupeQuestions([...previousQuestions]);
 
   if (shouldExtractQuestions) {

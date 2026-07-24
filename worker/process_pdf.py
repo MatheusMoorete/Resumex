@@ -4,7 +4,16 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 from pathlib import Path
+
+
+def clean_text(text: str) -> str:
+    if not text:
+        return ""
+    text = re.sub(r"[ \t]+", " ", text)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text.strip()
 
 
 def bbox_area(value) -> float:
@@ -37,18 +46,41 @@ def vision_reasons(page, text: str) -> list[str]:
 def render_page(page, destination: Path) -> None:
     import pymupdf as fitz
 
-    pixmap = page.get_pixmap(matrix=fitz.Matrix(1.6, 1.6), alpha=False)
-    destination.write_bytes(pixmap.tobytes("jpeg", jpg_quality=76))
+    pixmap = page.get_pixmap(matrix=fitz.Matrix(2.2, 2.2), alpha=False)
+    destination.write_bytes(pixmap.tobytes("jpeg", jpg_quality=92))
+
+
+def extract_blocks(page) -> list[dict]:
+    blocks = []
+    page_width = max(page.rect.width, 1.0)
+    page_height = max(page.rect.height, 1.0)
+    for block in page.get_text("blocks", sort=True):
+        if len(block) >= 7:
+            x0, y0, x1, y1, text, _block_no, block_type = block[:7]
+            cleaned = clean_text(text)
+            if cleaned:
+                blocks.append({
+                    "bbox": [
+                        round(max(0.0, min(1.0, x0 / page_width)), 4),
+                        round(max(0.0, min(1.0, y0 / page_height)), 4),
+                        round(max(0.0, min(1.0, x1 / page_width)), 4),
+                        round(max(0.0, min(1.0, y1 / page_height)), 4),
+                    ],
+                    "text": cleaned,
+                    "type": "text" if block_type == 0 else "image",
+                })
+    return blocks
 
 
 def extract_text(page) -> tuple[str, bool]:
-    text = page.get_text("text", sort=True).strip()
+    raw_text = page.get_text("text", sort=True)
+    text = clean_text(raw_text)
     if len(text) >= 150:
         return text, False
 
     try:
         text_page = page.get_textpage_ocr(language="por+eng", dpi=180, full=False)
-        ocr_text = page.get_text("text", textpage=text_page, sort=True).strip()
+        ocr_text = clean_text(page.get_text("text", textpage=text_page, sort=True))
         if len(ocr_text) > len(text):
             return ocr_text, True
     except RuntimeError:
@@ -57,14 +89,23 @@ def extract_text(page) -> tuple[str, bool]:
     return text, False
 
 
-def process(files: list[Path], output_dir: Path, mode: str, manual_pages: set[int]) -> dict:
+def process(
+    files: list[Path],
+    output_dir: Path,
+    mode: str,
+    manual_pages: set[int],
+    max_vision_pages: int = 300,
+) -> dict:
     import pymupdf as fitz
 
     output_dir.mkdir(parents=True, exist_ok=True)
     pages = []
     global_page = 0
+    vision_page_count = 0
 
     for source_index, file_path in enumerate(files):
+        if not file_path.exists():
+            raise FileNotFoundError(f"Arquivo não encontrado: {file_path.name}")
         with fitz.open(file_path) as document:
             if document.needs_pass:
                 raise ValueError(f"PDF protegido por senha: {file_path.name}")
@@ -82,6 +123,11 @@ def process(files: list[Path], output_dir: Path, mode: str, manual_pages: set[in
                 )
                 image_path = None
                 if needs_vision:
+                    vision_page_count += 1
+                    if vision_page_count > max_vision_pages:
+                        raise ValueError(
+                            f"Limite de {max_vision_pages} páginas visuais por job excedido"
+                        )
                     image_path = output_dir / f"page-{global_page}.jpg"
                     render_page(page, image_path)
 
@@ -91,6 +137,7 @@ def process(files: list[Path], output_dir: Path, mode: str, manual_pages: set[in
                     "sourceName": file_path.name,
                     "sourcePage": source_page,
                     "text": text,
+                    "blocks": extract_blocks(page),
                     "ocrUsed": ocr_used,
                     "needsVision": needs_vision,
                     "reasons": reasons,
@@ -127,12 +174,21 @@ def self_test() -> None:
     print("ok")
 
 
+import sys
+
+
 def main() -> None:
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8")
+    if hasattr(sys.stderr, "reconfigure"):
+        sys.stderr.reconfigure(encoding="utf-8")
+
     parser = argparse.ArgumentParser()
     parser.add_argument("files", nargs="*")
     parser.add_argument("--output-dir")
     parser.add_argument("--vision-mode", choices=("off", "auto", "all", "manual"), default="auto")
     parser.add_argument("--vision-pages", default="")
+    parser.add_argument("--max-vision-pages", type=int, default=300)
     parser.add_argument("--self-test", action="store_true")
     args = parser.parse_args()
 
@@ -148,6 +204,7 @@ def main() -> None:
         Path(args.output_dir),
         args.vision_mode,
         manual_pages,
+        max(0, args.max_vision_pages),
     )
     print(json.dumps(result, ensure_ascii=False))
 

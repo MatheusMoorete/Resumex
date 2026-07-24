@@ -40,18 +40,18 @@ Este arquivo vale para todo o repositório. Um `AGENTS.md` mais próximo do arqu
 ## Comandos
 
 ```powershell
-npm.cmd install
-npm.cmd run dev
-npm.cmd run dev:api
-npm.cmd run typecheck
-npm.cmd run build
-npm.cmd run check:flashcards
+npm install
+npm run dev
+npm run dev:api
+npm run typecheck
+npm run build
+npm run check:flashcards
 # Use python3 no Linux/Docker ou o Python configurado em PYTHON_BIN.
 python worker/process_pdf.py --self-test
-node --check server/index.js
+npm run test
 ```
 
-Use a verificação proporcional à mudança. Frontend: typecheck e build. Servidor: `node --check` mais o fluxo afetado. Worker: self-test. Scheduler: `check:flashcards`.
+Use a verificação proporcional à mudança. Frontend e servidor: typecheck, test e build. Worker: self-test. Scheduler: `check:flashcards`.
 
 ## Critério de pronto
 

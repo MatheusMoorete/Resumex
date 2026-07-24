@@ -1,16 +1,17 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { BookOpen, CircleHelp, LogOut, Menu, X } from 'lucide-react';
+import { BookOpen, CircleHelp, FolderArchive, LogOut, Menu, X } from 'lucide-react';
 import type { AuthUser } from '../domain/auth';
 import { authService } from '../services/authService';
 
 type AccountButtonProps = {
   user: AuthUser;
   onStudyCenter?: () => void;
+  onFichario?: () => void;
   onHowItWorks?: () => void;
 };
 
-export default function AccountButton({ user, onStudyCenter, onHowItWorks }: AccountButtonProps) {
+export default function AccountButton({ user, onStudyCenter, onFichario, onHowItWorks }: AccountButtonProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [isClosing, setIsClosing] = useState(false);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
@@ -92,6 +93,17 @@ export default function AccountButton({ user, onStudyCenter, onHowItWorks }: Acc
               >
                 <BookOpen aria-hidden="true" />
                 Central de estudo
+              </button>
+              <button
+                type="button"
+                className="side-menu-fichario-item"
+                onClick={() => {
+                  onFichario?.();
+                  closeMenu();
+                }}
+              >
+                <FolderArchive aria-hidden="true" />
+                Meu Fichário
               </button>
               <button
                 className="side-menu-how-it-works"

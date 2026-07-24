@@ -1,0 +1,140 @@
+import { describe, expect, it } from 'vitest';
+import app from '../src/app.js';
+import { normalizeNotionPageId, chunkText, getNotionTitle } from '../src/routes/notion.js';
+import {
+  normalizeAiPayload,
+  PUBLIC_AI_ROLES,
+  resolveAiRoute,
+  sanitizeAiMessages,
+} from '../src/routes/aiProxy.js';
+import { getClientId } from '../src/middlewares/rateLimit.js';
+import { normalizePreferences, preferenceInstructions } from '../summaryJobs.js';
+import { normalizeQuizOptions } from '../quizJobs.js';
+import { verifyQuestionEvidence } from '../../src/features/quiz/services/quizApi.js';
+
+describe('Server Modular Health & Utilities (TypeScript)', () => {
+  it('should export Express app instance', () => {
+    expect(app).toBeDefined();
+    expect(typeof app).toBe('function');
+  });
+
+  it('should normalize Notion page IDs correctly', () => {
+    const rawId = '1234567890abcdef1234567890abcdef';
+    const normalized = normalizeNotionPageId(rawId);
+    expect(normalized).toBe('12345678-90ab-cdef-1234-567890abcdef');
+  });
+
+  it('should chunk text into parts', () => {
+    const text = 'A'.repeat(5000);
+    const chunks = chunkText(text, 1900);
+    expect(chunks.length).toBe(3);
+    expect(chunks[0].length).toBe(1900);
+    expect(chunks[1].length).toBe(1900);
+    expect(chunks[2].length).toBe(1200);
+  });
+
+  it('should extract title from markdown heading', () => {
+    const markdown = '# Resumo de Cardiologia\n\nConteúdo sobre infarto...';
+    const title = getNotionTitle(markdown, 'Fallback');
+    expect(title).toBe('Resumo de Cardiologia');
+  });
+
+  it('should reject the removed legacy summary route', () => {
+    expect(resolveAiRoute('summary')).toBeNull();
+  });
+
+  it('should return null for invalid AI role', () => {
+    const route = resolveAiRoute('invalid-role-xyz');
+    expect(route).toBeNull();
+  });
+
+  it('should route vision through the bounded orchestrator', () => {
+    const route = resolveAiRoute('vision');
+    expect(route?.providerName).toBe('zhipu');
+  });
+
+  it('should keep quiz generation roles private to server jobs', () => {
+    expect(PUBLIC_AI_ROLES.has('quiz-generate')).toBe(false);
+    expect(PUBLIC_AI_ROLES.has('quiz-audit')).toBe(false);
+  });
+
+  it('should cap output and discard arbitrary provider options', () => {
+    const payload = normalizeAiPayload({
+      messages: [{ role: 'user', content: 'Crie cartões.' }],
+      max_tokens: 999_999,
+      temperature: 9,
+      n: 100,
+      tools: [{ type: 'function' }],
+    }, { providerName: 'deepseek', model: 'test-model' }, 'flashcards');
+
+    expect(payload.max_tokens).toBe(4096);
+    expect(payload.temperature).toBe(0.5);
+    expect(payload.n).toBeUndefined();
+    expect(payload.tools).toBeUndefined();
+  });
+
+  it('should reject oversized AI input', () => {
+    expect(() => sanitizeAiMessages('flashcards', [
+      { role: 'user', content: 'A'.repeat(180_001) },
+    ])).toThrow(/character limit/);
+  });
+
+  it('should rate limit authenticated users by user id', () => {
+    expect(getClientId({
+      authUser: { id: 'user-123' },
+      ip: '127.0.0.1',
+    } as any)).toBe('user-123');
+  });
+
+  it('should turn summary preferences into explicit server instructions', () => {
+    const instructions = preferenceInstructions({
+      method: 'clinical',
+      formats: ['text'],
+      detailLevel: 'concise',
+    });
+
+    expect(instructions).toContain('definição, achados, critérios, conduta');
+    expect(instructions).toContain('Não use tabelas');
+    expect(instructions).toContain('evite listas longas');
+    expect(instructions).not.toContain('perguntas de recuperação ativa');
+  });
+
+  it('should ignore flashcards and limit summary formats to two', () => {
+    expect(normalizePreferences({
+      formats: [{ id: 'bullets' }, { id: 'flashcards' }, { id: 'tables' }, { id: 'qa' }],
+    }).formats).toEqual(['bullets', 'tables']);
+  });
+
+  it('should bound quiz job options and reference questions', () => {
+    const options = normalizeQuizOptions({
+      questionCount: 999,
+      questionMode: 'anything',
+      practiceMode: 'focused',
+      previousQuestions: Array.from({ length: 100 }, (_, index) => ({
+        stem: `Questão ${index}`,
+        explanation: 'A'.repeat(5000),
+      })),
+    });
+
+    expect(options.questionCount).toBe(15);
+    expect(options.questionMode).toBe('generated_only');
+    expect(options.previousQuestions).toHaveLength(45);
+    expect(options.previousQuestions[0].explanation).toHaveLength(1200);
+  });
+
+  it('should verify quiz evidence on the declared file and page', () => {
+    const files = [{
+      name: 'cardiologia.pdf',
+      pageTexts: ['A dose inicial é 100 mg por via oral.', 'Conduta de acompanhamento.'],
+      text: 'A dose inicial é 100 mg por via oral.\nConduta de acompanhamento.',
+    }];
+    const question = {
+      sourceFile: 'cardiologia.pdf',
+      sourcePage: '2',
+      evidenceQuote: 'A dose inicial é 100 mg por via oral.',
+    };
+
+    expect(verifyQuestionEvidence(question, files).evidenceVerified).toBe(false);
+    expect(verifyQuestionEvidence({ ...question, sourcePage: '1' }, files).evidenceVerified).toBe(true);
+  });
+});

@@ -27,9 +27,27 @@ function normalizedRegion(bbox?: Region | null): Region {
 
 export default function PdfRegionPreview({ pdfUrl, pageNumber, bbox, onOpen }: Props) {
   const [imageUrl, setImageUrl] = useState('');
+  const [shouldRender, setShouldRender] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement>(null);
   const renderTaskRef = useRef<any>(null);
 
   useEffect(() => {
+    const trigger = triggerRef.current;
+    if (!trigger || !('IntersectionObserver' in window)) {
+      setShouldRender(true);
+      return undefined;
+    }
+    const observer = new IntersectionObserver(([entry]) => {
+      if (!entry.isIntersecting) return;
+      setShouldRender(true);
+      observer.disconnect();
+    }, { rootMargin: '240px' });
+    observer.observe(trigger);
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    if (!shouldRender) return undefined;
     let cancelled = false;
     let document: any = null;
 
@@ -78,21 +96,22 @@ export default function PdfRegionPreview({ pdfUrl, pageNumber, bbox, onOpen }: P
       renderTaskRef.current?.cancel?.();
       document?.destroy?.();
     };
-  }, [bbox, pageNumber, pdfUrl]);
+  }, [bbox, pageNumber, pdfUrl, shouldRender]);
 
   return (
     <button
       type="button"
+      ref={triggerRef}
       className="pdf-region-trigger"
       onClick={onOpen}
-      aria-label={`Ver trecho da página ${pageNumber} e responder à dúvida`}
+      aria-label={`Ampliar trecho da página ${pageNumber}`}
     >
       {imageUrl ? (
         <>
           <img className="pdf-region-thumb" src={imageUrl} alt={`Trecho da página ${pageNumber}`} />
           <span className="pdf-region-hovercard" aria-hidden="true">
             <img src={imageUrl} alt="" />
-            <strong>Clique para conferir e responder</strong>
+            <strong>Clique para ampliar no PDF</strong>
           </span>
         </>
       ) : (

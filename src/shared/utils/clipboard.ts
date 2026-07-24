@@ -38,7 +38,7 @@ export function stripPageReferences(markdown) {
   if (!markdown) return markdown;
 
   return markdown
-    .replace(/\s*\((?:p\.|página|pág\.?)\s*\d+(?:\s*-\s*\d+)?\)/gi, '')
+    .replace(/\s*\((?:p\.|pág\.?|página)\s*\d+(?:\s*[-,\s]\s*\d+)?\)\.?/gi, '')
     .replace(/[ \t]+\n/g, '\n')
     .replace(/\n{3,}/g, '\n\n')
     .trim();

@@ -2,13 +2,23 @@
 
 Estas instruções valem para `server/`. O servidor é a fronteira de confiança; validação no frontend nunca substitui estas regras.
 
-## Estrutura
+## Estrutura Modular Agent-First
 
-- `index.js`: composição Express, headers, autenticação, allowlist, rate limit, roteamento de modelos, proxy de IA, Notion e SPA fallback.
-- `summaryJobs.js`: criação/upload/polling de jobs, fila em memória, arquivos temporários e chamada do worker.
-- `auth/authProvider.js`: seleciona o adaptador pelo ambiente.
-- `auth/adapters/supabaseAuthProvider.js`: valida access token Supabase.
-- Arquivos de `api/` são adaptadores finos de deploy e devem apontar para esta implementação, não duplicá-la.
+- `index.js`: Ponto de entrada enxuto que inicializa o escutador HTTP na porta configurada.
+- `src/app.js`: Composição da aplicação Express, registro de middlewares globais, rotas e fallback SPA.
+- `src/config/env.js`: Variáveis de ambiente, URLs dos provedores, modelos de IA e constantes globais.
+- `src/middlewares/`:
+  - `auth.js`: Autenticação Supabase, tokens Bearer e `requireAuth`.
+  - `security.js`: Headers de segurança (nosniff, HSTS, CSP), utilitários locais e handler de JSON inválido.
+  - `rateLimit.js`: Algoritmo de rate limit por IP/cliente.
+- `src/routes/`:
+  - `health.js`: Endpoints `/api/health`, `/api/auth/*` e `/api/config`.
+  - `aiProxy.js`: Orquestrador de IA, seleção de modelos/auditores e proxy para DeepSeek/OpenAI/Kimi.
+  - `notion.js`: Exportador e conversor de Markdown para blocos da API do Notion.
+- `src/schemas/`: Validation Schemas Zod em runtime para payloads de API.
+- `summaryJobs.js`: Criação/upload/polling de jobs, fila em memória e worker PDF.
+- `quizJobs.ts`: upload/polling/cancelamento de simulados, worker PDF e orquestração server-side.
+- `auth/`: Adaptadores de autenticação (Supabase / Mock).
 
 ## Segurança obrigatória
 
@@ -31,12 +41,19 @@ Estas instruções valem para `server/`. O servidor é a fronteira de confiança
 - A fila global serial é decisão consciente; só introduza fila externa quando concorrência real justificar.
 - `publicJob` é a lista permitida de campos devolvidos. Não exponha paths internos, prompts ou objetos de provedor.
 
+## Jobs de simulado
+
+- Aceitam somente 15, 30 ou 45 questões, um job ativo e três criações/inícios por hora por usuário.
+- A leitura visual é automática, limitada a 30 páginas; geração e auditoria são papéis internos, não acessíveis pelo proxy público.
+- PDFs e imagens temporárias são removidos assim que o job termina, falha ou é cancelado.
+
 ## Verificação
 
 ```powershell
 node --check server/index.js
-node --check server/summaryJobs.js
-npm.cmd run typecheck
+node --check server/src/app.js
+npm run test
+npm run typecheck
 ```
 
 Ao mudar endpoint, valide sem token, token não autorizado, payload inválido, rate limit e caminho feliz.

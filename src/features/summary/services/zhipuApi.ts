@@ -7,8 +7,7 @@
 import { buildVisionTranscriptionPrompt } from '../prompts/templates';
 import { buildAuthHeaders } from '../../auth/services/authClient';
 
-const API_URL = '/api/zhipu/chat/completions';
-const MODEL_NAME = 'glm-4.5v';
+const API_URL = '/api/ai/chat/completions';
 const TRANSCRIPTION_CONCURRENCY = 2;
 
 /**
@@ -102,7 +101,7 @@ async function transcribeSinglePage({ apiKey, pageImage, pageNum, totalPages, si
     headers,
     credentials: 'same-origin',
     body: JSON.stringify({
-      model: MODEL_NAME,
+      role: 'vision',
       messages: [
         {
           role: 'system',
@@ -154,7 +153,7 @@ export async function validateZhipuApiKey(apiKey) {
       headers,
       credentials: 'same-origin',
       body: JSON.stringify({
-        model: MODEL_NAME,
+        role: 'vision',
         messages: [{ role: 'user', content: 'Olá' }],
         max_tokens: 5,
       }),

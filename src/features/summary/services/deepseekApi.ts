@@ -10,17 +10,6 @@ const API_URL = '/api/ai/chat/completions';
 const DEEPSEEK_VALIDATION_URL = '/api/deepseek/chat/completions';
 
 export type AiRole =
-  | 'evidence'
-  | 'spec'
-  | 'spec-audit'
-  | 'spec-audit-simple'
-  | 'spec-audit-critical'
-  | 'spec-correction'
-  | 'summary'
-  | 'summary-audit'
-  | 'summary-audit-simple'
-  | 'summary-audit-critical'
-  | 'summary-repair'
   | 'flashcards';
 
 type MessageContent =
@@ -95,7 +84,7 @@ export async function generateSummary({
   pageImages,
   onChunk,
   signal,
-  role = 'summary',
+  role = 'flashcards',
   maxTokens,
   temperature = 0.1,
 }: GenerateSummaryParams) {

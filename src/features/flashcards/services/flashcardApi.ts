@@ -1,6 +1,8 @@
 import { buildAuthHeaders } from '../../auth/services/authClient';
 import type { Flashcard, FlashcardDeck, FlashcardDraft, ScheduledReview } from '../domain/flashcards';
 
+export type { Flashcard, FlashcardDeck, FlashcardDraft, ScheduledReview };
+
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
 const isMock = import.meta.env.DEV && import.meta.env.VITE_E2E_MOCK === 'true';

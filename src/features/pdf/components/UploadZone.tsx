@@ -3,6 +3,7 @@ import { extractTextFromPDF, formatFileSize } from '../services/pdfExtractor';
 import { createPdfCorpus } from '../services/pdfCorpus';
 import QuizUpload from '../../quiz/components/QuizUpload';
 import FlashcardHome from '../../flashcards/components/FlashcardHome';
+import { FicharioView } from '../../fichario/components/FicharioView';
 import FicharioPanelHeader from '../../../shared/components/FicharioPanelHeader';
 import FicharioPdfDropzone from '../../../shared/components/FicharioPdfDropzone';
 import StudyModeTabs, { type StudyMode } from '../../../shared/components/StudyModeTabs';

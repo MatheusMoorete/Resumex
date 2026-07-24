@@ -34,7 +34,10 @@ export const mockEvidenceMap = `## Página 1
 
 ### Conceitos centrais
 - Material clínico simulado para validar o fluxo local.
-- Toda informação permanece vinculada à página de origem.`;
+- Toda informação permanece vinculada à página de origem.
+
+### Manuscritos incertos
+- Dose possivelmente incerta: 5 mg ou 15 mg?`;
 
 export const mockSpec = `# Plano do resumo
 

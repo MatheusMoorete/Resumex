@@ -9,7 +9,7 @@ O resumo é conteúdo médico de alto risco. Fidelidade e rastreabilidade têm p
 - O servidor executa `server/summaryJobs.js` e `worker/process_pdf.py`.
 - `components/ProcessingView.tsx` traduz estágios do job em feedback visível.
 - `components/ResultView.tsx` exibe Markdown, fonte/PDF e exportação.
-- `App.tsx` ainda contém o fluxo detalhado SPEC/auditoria usado por caminhos locais e legados. Não o remova sem rastrear todos os callers.
+- `App.tsx` apenas inicia e acompanha o job; geração de SPEC e resumo acontece no servidor.
 
 ## Invariantes
 
@@ -31,4 +31,4 @@ Atualize em conjunto:
 3. `components/ProcessingView.tsx` se estágios/progresso mudarem;
 4. worker e documentação, se o manifesto mudar.
 
-Verifique typecheck/build, `node --check server/index.js` e `python worker/process_pdf.py --self-test` quando aplicável.
+Verifique typecheck/build, `npm run test` e `python worker/process_pdf.py --self-test` quando aplicável.

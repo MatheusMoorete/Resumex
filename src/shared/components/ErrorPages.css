@@ -1,0 +1,390 @@
+/* =============================================
+   RESUMEX — Error Pages Design System
+   Neo-Brutalist Vintage Editorial ("Paper & Ink")
+   ============================================= */
+
+.error-page-container {
+  --err-ink: #203229;
+  --err-paper: #f4ead3;
+  --err-light: #fffdf6;
+  --err-green: #285044;
+  --err-coral: #ef967a;
+  --err-yellow: #efc84a;
+  --err-blue: #c7d9f2;
+  --err-red: #c53030;
+
+  min-height: 80vh;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  overflow: hidden;
+  padding: clamp(24px, 5vw, 60px) clamp(16px, 4vw, 40px);
+  color: var(--err-ink);
+  background-color: var(--err-paper);
+  background-image:
+    linear-gradient(rgba(32, 50, 41, 0.07) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(32, 50, 41, 0.07) 1px, transparent 1px);
+  background-size: 28px 28px;
+  font-family: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+  box-sizing: border-box;
+}
+
+/* Ambient watermark background circles */
+.error-page-container::before {
+  content: '';
+  position: absolute;
+  top: 6%;
+  left: 18%;
+  width: 90px;
+  height: 90px;
+  border: 1.5px solid rgba(32, 50, 41, 0.12);
+  border-radius: 50%;
+  pointer-events: none;
+}
+
+.error-page-container::after {
+  content: '';
+  position: absolute;
+  bottom: 8%;
+  right: 14%;
+  width: 110px;
+  height: 110px;
+  border: 1.5px solid rgba(32, 50, 41, 0.12);
+  border-radius: 50%;
+  pointer-events: none;
+}
+
+/* Base sheet card styling */
+.error-card-sheet {
+  position: relative;
+  z-index: 1;
+  width: min(640px, 94vw);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: clamp(32px, 5vw, 48px) clamp(24px, 5vw, 44px);
+  border: 2px solid var(--err-ink);
+  border-radius: 16px 4px 20px 6px;
+  background: var(--err-light);
+  box-shadow: 14px 16px 0 rgba(32, 50, 41, 0.16);
+  animation: errorSheetReveal 480ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* Generic Error Card - slight tilt left */
+.generic-error-card {
+  transform: rotate(-1.2deg);
+}
+
+/* 404 Error Card - slight tilt right */
+.not-found-error-card {
+  transform: rotate(1deg);
+  width: min(640px, 94vw);
+  min-height: 380px;
+}
+
+/* Tape strip on top of generic error sheet */
+.error-tape-strip {
+  position: absolute;
+  top: -14px;
+  left: 50%;
+  width: 110px;
+  height: 28px;
+  border: 1.5px solid var(--err-ink);
+  background: rgba(244, 234, 211, 0.85);
+  backdrop-filter: blur(2px);
+  transform: translateX(-50%) rotate(-1deg);
+  pointer-events: none;
+}
+
+/* Paperclip SVG graphic on top right edge */
+.error-paperclip {
+  position: absolute;
+  top: -18px;
+  right: 38px;
+  width: 34px;
+  height: 60px;
+  z-index: 3;
+  pointer-events: none;
+}
+
+/* Coral Stamp / Post-it badge */
+.error-stamp-badge {
+  position: absolute;
+  top: 18px;
+  right: -14px;
+  z-index: 4;
+  padding: 8px 14px;
+  border: 2px solid var(--err-ink);
+  background: var(--err-coral);
+  color: var(--err-ink);
+  box-shadow: 4px 4px 0 var(--err-ink);
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  transform: rotate(3deg);
+  white-space: nowrap;
+}
+
+/* Red double-circle warning badge */
+.error-icon-badge {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 64px;
+  height: 64px;
+  border: 3.5px solid var(--err-red);
+  border-radius: 50%;
+  padding: 4px;
+  margin-bottom: 20px;
+}
+
+.error-icon-inner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  background: var(--err-red);
+  color: #ffffff;
+  border-radius: 50%;
+  font-family: Georgia, serif;
+  font-size: 28px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+/* 404 Huge Heading */
+.error-404-number {
+  margin: 10px 0 16px;
+  color: var(--err-ink);
+  font-family: Georgia, serif;
+  font-size: clamp(4.5rem, 12vw, 6.8rem);
+  font-weight: 700;
+  line-height: 0.9;
+  letter-spacing: -0.05em;
+}
+
+/* Error Title */
+.error-sheet-title {
+  margin: 0 0 12px;
+  color: var(--err-ink);
+  font-family: Georgia, serif;
+  font-size: clamp(1.6rem, 3.5vw, 2.2rem);
+  font-weight: 700;
+  line-height: 1.15;
+  letter-spacing: -0.02em;
+}
+
+/* Error Subtitle / Body text */
+.error-sheet-description {
+  max-width: 480px;
+  margin: 0 0 24px;
+  color: rgba(32, 50, 41, 0.78);
+  font-size: 0.94rem;
+  line-height: 1.55;
+}
+
+/* Trace box styling (Post-it style for error stack/code) */
+.error-trace-box {
+  position: relative;
+  width: 100%;
+  max-width: 520px;
+  margin: 0 0 28px;
+  padding: 16px 18px 14px;
+  border: 1.5px solid var(--err-ink);
+  background: var(--err-paper);
+  box-shadow: 4px 4px 0 rgba(32, 50, 41, 0.14);
+  text-align: left;
+}
+
+.error-trace-badge {
+  position: absolute;
+  top: -12px;
+  left: 14px;
+  padding: 2px 7px;
+  border: 1.5px solid var(--err-ink);
+  background: var(--err-light);
+  color: var(--err-ink);
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+/* Scrollable log area inside trace box */
+.error-trace-content {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.76rem;
+  color: var(--err-ink);
+  line-height: 1.5;
+  max-height: 190px;
+  overflow-y: auto;
+  word-break: break-word;
+  white-space: pre-wrap;
+  padding-right: 6px;
+}
+
+/* Vintage Paper Scrollbar styling for trace log */
+.error-trace-content::-webkit-scrollbar {
+  width: 6px;
+}
+.error-trace-content::-webkit-scrollbar-track {
+  background: rgba(32, 50, 41, 0.08);
+  border-radius: 3px;
+}
+.error-trace-content::-webkit-scrollbar-thumb {
+  background: var(--err-ink);
+  border-radius: 3px;
+}
+
+.error-trace-code {
+  font-weight: 600;
+  color: var(--err-red);
+}
+
+.error-trace-timestamp {
+  display: block;
+  margin-top: 8px;
+  padding-top: 6px;
+  border-top: 1px dashed rgba(32, 50, 41, 0.2);
+  color: rgba(32, 50, 41, 0.65);
+  font-size: 0.7rem;
+}
+
+/* Action Buttons Container */
+.error-actions-group {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  width: 100%;
+}
+
+/* Yellow Action Button (Paper & Ink style) */
+.btn-error-yellow {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-height: 48px;
+  padding: 12px 24px;
+  border: 2px solid var(--err-ink);
+  background: var(--err-yellow);
+  color: var(--err-ink);
+  box-shadow: 4px 4px 0 var(--err-ink);
+  font-family: 'IBM Plex Sans', sans-serif;
+  font-size: 0.82rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  text-decoration: none;
+  cursor: pointer;
+  transition: transform 150ms ease, box-shadow 150ms ease;
+}
+
+.btn-error-yellow:hover {
+  transform: translate(2px, 2px);
+  box-shadow: 2px 2px 0 var(--err-ink);
+}
+
+.btn-error-yellow:active {
+  transform: translate(4px, 4px);
+  box-shadow: 0 0 0 var(--err-ink);
+}
+
+/* Dark Green Action Button */
+.btn-error-green {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-height: 48px;
+  padding: 12px 26px;
+  border: 2px solid var(--err-ink);
+  background: var(--err-green);
+  color: var(--err-yellow);
+  box-shadow: 5px 5px 0 var(--err-ink);
+  font-family: 'IBM Plex Sans', sans-serif;
+  font-size: 0.84rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  text-decoration: none;
+  cursor: pointer;
+  transition: transform 150ms ease, box-shadow 150ms ease;
+}
+
+.btn-error-green:hover {
+  transform: translate(2px, 2px);
+  box-shadow: 3px 3px 0 var(--err-ink);
+}
+
+.btn-error-green:active {
+  transform: translate(5px, 5px);
+  box-shadow: 0 0 0 var(--err-ink);
+}
+
+/* Outline Secondary Button */
+.btn-error-outline {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 48px;
+  padding: 12px 20px;
+  border: 2px solid var(--err-ink);
+  background: var(--err-light);
+  color: var(--err-ink);
+  box-shadow: 4px 4px 0 var(--err-ink);
+  font-family: 'IBM Plex Sans', sans-serif;
+  font-size: 0.82rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: transform 150ms ease, box-shadow 150ms ease;
+}
+
+.btn-error-outline:hover {
+  transform: translate(2px, 2px);
+  box-shadow: 2px 2px 0 var(--err-ink);
+}
+
+@keyframes errorSheetReveal {
+  from {
+    opacity: 0;
+    transform: translateY(16px) scale(0.99);
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@media (max-width: 640px) {
+  .error-card-sheet {
+    padding: 32px 18px;
+  }
+  .error-stamp-badge {
+    right: 12px;
+    top: -14px;
+  }
+  .error-paperclip {
+    right: 18px;
+  }
+  .error-actions-group {
+    flex-direction: column;
+    width: 100%;
+  }
+  .btn-error-yellow,
+  .btn-error-green,
+  .btn-error-outline {
+    width: 100%;
+  }
+}

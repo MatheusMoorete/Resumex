@@ -6,21 +6,6 @@ import PdfSplitViewer from '../../pdf/components/PdfSplitViewer';
 import PdfRegionPreview from './PdfRegionPreview';
 import pdfIcon from '../../../assets/pdf_icon.png';
 
-function getAuditStatus(specAudit) {
-  if (!specAudit) return 'Pendente';
-  const match = specAudit.match(/\*\*Status:\*\*\s*([^\n]+)/i);
-  return match ? match[1].trim() : 'Pendente';
-}
-
-function getAuditIssues(specAudit) {
-  if (!specAudit) return [];
-  return specAudit
-    .split('\n')
-    .map((line) => line.trim())
-    .filter((line) => /^(\d+\.|-)\s+/.test(line))
-    .slice(0, 6);
-}
-
 function isRiskDecisionResolved(decision) {
   if (!decision) return false;
   if (decision.action === 'correct') return Boolean(decision.value?.trim());
@@ -30,14 +15,11 @@ function isRiskDecisionResolved(decision) {
 const GENERATION_STAGES = [
   { id: 'evidence', label: 'Mapeando evidências', description: 'Relacionando os conceitos às páginas de origem e preservando o contexto do material.' },
   { id: 'structure', label: 'Montando a estrutura', description: 'Aplicando o método, os formatos e a profundidade escolhidos por você.' },
-  { id: 'audit', label: 'Auditando e corrigindo', description: 'Verificando inconsistências com um segundo modelo antes de liberar o plano.' },
 ];
 
 export default function SpecEditor({
   fileData,
   spec,
-  specAudit,
-  specCorrectionCount = 0,
   highRiskItems = [],
   riskDecisions = {},
   isGenerating,
@@ -45,21 +27,17 @@ export default function SpecEditor({
   onSpecChange,
   onRiskDecisionChange,
   onGenerate,
-  onRegenerateSpec,
   onBack,
   isVisualReview = false,
 }) {
-  const [viewMode, setViewMode] = useState('preview');
+  const [viewMode, setViewMode] = useState(
+    isVisualReview && highRiskItems.length > 0 ? 'risk' : 'preview'
+  );
   const [pdfReviewItem, setPdfReviewItem] = useState(null);
   const textareaRef = useRef(null);
-  const correctionInputRef = useRef(null);
-  const hasAudit = Boolean(specAudit?.trim());
-  const auditStatus = getAuditStatus(specAudit);
-  const auditIssues = getAuditIssues(specAudit);
   const unresolvedRiskCount = highRiskItems.filter((item) => !isRiskDecisionResolved(riskDecisions[item.id])).length;
   const completedRiskCount = highRiskItems.length - unresolvedRiskCount;
-  const normalizedGenerationStage = generationStage === 'correction' ? 'audit' : generationStage;
-  const generationStageIndex = Math.max(0, GENERATION_STAGES.findIndex((item) => item.id === normalizedGenerationStage));
+  const generationStageIndex = Math.max(0, GENERATION_STAGES.findIndex((item) => item.id === generationStage));
   const currentGenerationStage = GENERATION_STAGES[generationStageIndex];
   const resolvedPdfReview = pdfReviewItem
     ? resolveCorpusPage(fileData, pdfReviewItem.page)
@@ -81,7 +59,6 @@ export default function SpecEditor({
       if (event.key === 'Escape') setPdfReviewItem(null);
     };
     window.addEventListener('keydown', handleKeyDown);
-    window.setTimeout(() => correctionInputRef.current?.focus(), 80);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [pdfReviewItem]);
 
@@ -114,10 +91,10 @@ export default function SpecEditor({
           <h2>{isGenerating ? 'Analisando material' : 'Plano do resumo'}</h2>
           <p>
             {isGenerating
-              ? 'Criando mapa de evidências, estruturando e auditando o plano.'
+              ? 'Lendo o material e preparando a estrutura do plano.'
               : isVisualReview
                 ? 'Confira o plano e responda apenas às dúvidas visuais antes de gerar o resumo.'
-                : 'Confira a estrutura antes de gerar. A auditoria permanece separada do conteúdo do resumo.'}
+                : 'Confira a estrutura antes de gerar o resumo.'}
           </p>
         </div>
 
@@ -129,14 +106,6 @@ export default function SpecEditor({
             >
               Plano
             </button>
-            {hasAudit && (
-              <button
-                className={`result-tab ${viewMode === 'audit' ? 'active' : ''}`}
-                onClick={() => setViewMode('audit')}
-              >
-                Auditoria
-              </button>
-            )}
             <button
               className={`result-tab ${viewMode === 'risk' ? 'active' : ''}`}
               onClick={() => setViewMode('risk')}
@@ -152,27 +121,6 @@ export default function SpecEditor({
           </div>
         )}
       </div>
-
-      {!isGenerating && !isVisualReview && (
-        <div className="spec-quality-bar">
-          <div>
-            <span className="spec-quality-label">Status da auditoria</span>
-            <strong>{auditStatus}</strong>
-          </div>
-          <div>
-            <span className="spec-quality-label">Correções automáticas</span>
-            <strong>{specCorrectionCount}</strong>
-          </div>
-          <div>
-            <span className="spec-quality-label">Ajustes pendentes</span>
-            <strong>{auditIssues.length}</strong>
-          </div>
-          <div>
-            <span className="spec-quality-label">Riscos sem decisão</span>
-            <strong>{unresolvedRiskCount}</strong>
-          </div>
-        </div>
-      )}
 
       {!isGenerating && unresolvedRiskCount > 0 && viewMode !== 'risk' && (
         <button
@@ -200,8 +148,8 @@ export default function SpecEditor({
                   </p>
                   <div className="spec-generation-current" role="status" aria-live="polite">
                     <span>AGORA</span>
-                    <strong>{generationStage === 'correction' ? 'Corrigindo inconsistências' : currentGenerationStage.label}</strong>
-                    <p>{generationStage === 'correction' ? 'A auditoria encontrou ajustes e o plano está sendo corrigido antes de uma nova verificação.' : currentGenerationStage.description}</p>
+                    <strong>{currentGenerationStage.label}</strong>
+                    <p>{currentGenerationStage.description}</p>
                     <i aria-hidden="true"><b /><b /><b /></i>
                   </div>
                   <div className="spec-generation-steps" aria-label={`Etapa ${generationStageIndex + 1} de ${GENERATION_STAGES.length}`}>
@@ -255,44 +203,16 @@ export default function SpecEditor({
             {isGenerating && (
               <div className="spec-generating-indicator">
                 <span className="spec-generating-dot" />
-                <span>Etapa {generationStageIndex + 1} de {GENERATION_STAGES.length} · {generationStage === 'correction' ? 'Corrigindo inconsistências encontradas' : currentGenerationStage.label}</span>
+                <span>Etapa {generationStageIndex + 1} de {GENERATION_STAGES.length} · {currentGenerationStage.label}</span>
               </div>
             )}
-          </div>
-        )}
-
-        {viewMode === 'audit' && !isGenerating && (
-          <div className="spec-audit-layout">
-            <aside className="spec-audit-summary">
-              <h3>Inconsistencias encontradas</h3>
-              {auditIssues.length > 0 ? (
-                auditIssues.map((issue, index) => (
-                  <div className="spec-audit-card" key={`${issue}-${index}`}>
-                    {issue.replace(/^(\d+\.|-)\s+/, '')}
-                  </div>
-                ))
-              ) : (
-                <div className="spec-audit-card muted">Nenhuma inconsistencia acionavel identificada.</div>
-              )}
-            </aside>
-            <div className="spec-preview-wrapper">
-              <div className="spec-preview-content">
-                {specAudit ? (
-                  <MarkdownPreview content={specAudit} />
-                ) : (
-                  <div style={{ color: 'var(--text-muted)', textAlign: 'center', padding: 'var(--space-3xl)' }}>
-                    Nenhuma auditoria disponivel.
-                  </div>
-                )}
-              </div>
-            </div>
           </div>
         )}
 
         {viewMode === 'edit' && !isGenerating && (
           <div className="spec-editor-wrapper">
             <div className="spec-edit-helper">
-              Edite apenas o plano que sera enviado ao DeepSeek. A auditoria fica separada para consulta.
+              Edite o plano que será usado para gerar o resumo.
             </div>
             <textarea
               ref={textareaRef}
@@ -311,7 +231,7 @@ export default function SpecEditor({
             <div className="spec-risk-header">
               <h3>Dúvidas encontradas no material</h3>
               <p>
-                Passe o mouse sobre a imagem para ampliar. Clique para conferir o PDF e responder. {completedRiskCount} de {highRiskItems.length} revisadas.
+                Responda com um clique. Se precisar conferir melhor, amplie o trecho no PDF. {completedRiskCount} de {highRiskItems.length} revisadas.
               </p>
             </div>
 
@@ -325,20 +245,13 @@ export default function SpecEditor({
                   const decision = riskDecisions[item.id];
                   const resolved = isRiskDecisionResolved(decision);
                   const source = resolveCorpusPage(fileData, item.page);
-                  const answerLabel = decision?.action === 'ignore'
-                    ? 'Este trecho será ignorado'
-                    : decision?.action === 'use'
-                      ? 'Leitura sugerida confirmada'
-                      : decision?.action === 'correct'
-                        ? `Correção: ${decision.value}`
-                        : '';
                   return (
                     <div className={`spec-risk-card ${resolved ? 'resolved' : ''}`} key={item.id}>
                       <div className="spec-risk-card-header">
-                        <span>Pagina {item.page}{item.section ? ` · ${item.section}` : ''}</span>
-                        <strong>{resolved ? 'Resolvido' : 'Pendente'}</strong>
+                        <span>Página {item.page}{item.section ? ` · ${item.section}` : ''}</span>
+                        <strong>{resolved ? 'Respondido' : 'Pendente'}</strong>
                       </div>
-                      <div className="spec-risk-evidence">
+                      <div className={`spec-risk-evidence ${source.pdfUrl ? '' : 'text-only'}`}>
                         {source.pdfUrl && (
                           <PdfRegionPreview
                             pdfUrl={source.pdfUrl}
@@ -348,17 +261,66 @@ export default function SpecEditor({
                           />
                         )}
                         <div>
-                          <div className="spec-risk-text">{item.text}</div>
+                          <span className="spec-risk-reading-label">LEITURA SUGERIDA</span>
+                          <div className="spec-risk-text">“{item.text}”</div>
                           <div className="spec-risk-reason">{item.reason}</div>
-                          {answerLabel && <div className="spec-risk-answer">{answerLabel}</div>}
+                          {source.pdfUrl && (
+                            <button
+                              type="button"
+                              className="spec-risk-pdf-button"
+                              onClick={() => setPdfReviewItem(item)}
+                            >
+                              Ampliar trecho no PDF
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                      <div className="spec-risk-decision" role="group" aria-label={`Resposta para a dúvida da página ${item.page}`}>
+                        <span>Como devemos tratar este trecho?</span>
+                        <div className="spec-risk-choice-row">
                           <button
                             type="button"
-                            className="spec-risk-pdf-button"
-                            onClick={() => setPdfReviewItem(item)}
+                            className={decision?.action === 'use' ? 'selected' : ''}
+                            aria-pressed={decision?.action === 'use'}
+                            onClick={() => onRiskDecisionChange(item.id, { action: 'use', value: item.text })}
                           >
-                            {resolved ? 'Revisar resposta' : 'Conferir e responder'}
+                            Está correto
+                          </button>
+                          <button
+                            type="button"
+                            className={decision?.action === 'correct' ? 'selected' : ''}
+                            aria-pressed={decision?.action === 'correct'}
+                            onClick={() => onRiskDecisionChange(item.id, {
+                              action: 'correct',
+                              value: decision?.action === 'correct' ? decision.value : '',
+                            })}
+                          >
+                            Quero corrigir
+                          </button>
+                          <button
+                            type="button"
+                            className={decision?.action === 'ignore' ? 'selected' : ''}
+                            aria-pressed={decision?.action === 'ignore'}
+                            onClick={() => onRiskDecisionChange(item.id, { action: 'ignore', value: '' })}
+                          >
+                            Ignorar trecho
                           </button>
                         </div>
+                        {decision?.action === 'correct' && (
+                          <label className="spec-risk-correction">
+                            Escreva o texto correto
+                            <input
+                              className="input"
+                              value={decision.value}
+                              placeholder="Digite exatamente o que está escrito"
+                              onChange={(event) => onRiskDecisionChange(item.id, {
+                                action: 'correct',
+                                value: event.target.value,
+                              })}
+                              autoFocus
+                            />
+                          </label>
+                        )}
                       </div>
                     </div>
                   );
@@ -374,11 +336,6 @@ export default function SpecEditor({
           <button className="btn btn-ghost" onClick={onBack}>
             Voltar
           </button>
-          {onRegenerateSpec && (
-            <button className="btn btn-secondary" onClick={onRegenerateSpec}>
-              Regenerar plano
-            </button>
-          )}
           <button
             className="btn btn-primary btn-lg"
             onClick={handlePrimaryAction}
@@ -413,49 +370,6 @@ export default function SpecEditor({
               sourceText={`${pdfReviewItem.text}\n${pdfReviewItem.context || ''}`}
               focusRect={pdfReviewItem.bbox}
             />
-            <aside className="pdf-review-question">
-              <span className="spec-header-kicker">CONFIRME A LEITURA</span>
-              <h3>O que está escrito nesta região?</h3>
-              <p><strong>Leitura sugerida:</strong> {pdfReviewItem.text}</p>
-              <p>{pdfReviewItem.reason}</p>
-              <div className="pdf-review-actions">
-                <button
-                  type="button"
-                  className={`btn btn-secondary ${riskDecisions[pdfReviewItem.id]?.action === 'use' ? 'selected' : ''}`}
-                  onClick={() => onRiskDecisionChange(pdfReviewItem.id, { action: 'use', value: pdfReviewItem.text })}
-                >
-                  Está correto
-                </button>
-                <button
-                  type="button"
-                  className={`btn btn-secondary ${riskDecisions[pdfReviewItem.id]?.action === 'ignore' ? 'selected' : ''}`}
-                  onClick={() => onRiskDecisionChange(pdfReviewItem.id, { action: 'ignore', value: '' })}
-                >
-                  Ignorar trecho
-                </button>
-              </div>
-              <label className="spec-risk-correction">
-                Se estiver diferente, escreva a correção
-                <input
-                  ref={correctionInputRef}
-                  className="input"
-                  value={riskDecisions[pdfReviewItem.id]?.action === 'correct' ? riskDecisions[pdfReviewItem.id].value : ''}
-                  placeholder="Digite exatamente o que está escrito"
-                  onChange={(event) => onRiskDecisionChange(pdfReviewItem.id, {
-                    action: 'correct',
-                    value: event.target.value,
-                  })}
-                />
-              </label>
-              <button
-                type="button"
-                className="btn btn-primary"
-                disabled={!isRiskDecisionResolved(riskDecisions[pdfReviewItem.id])}
-                onClick={() => setPdfReviewItem(null)}
-              >
-                Salvar e fechar
-              </button>
-            </aside>
           </div>
         </div>
       )}

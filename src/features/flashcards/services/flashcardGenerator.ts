@@ -19,6 +19,7 @@ export async function generateFlashcardsFromSummary({
     apiKey,
     role: 'flashcards',
     pdfText: summary,
+    maxTokens: 4096,
     signal,
     onChunk: () => undefined,
     systemPrompt: `Você transforma um resumo médico em flashcards de recuperação ativa.

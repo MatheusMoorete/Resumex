@@ -30,34 +30,38 @@ O score considera volume, páginas, arquivos, tabelas, valores/comparadores crí
 
 | Função | Papel de API | Modelo padrão |
 | --- | --- | --- |
-| Mapa de evidências, SPEC, correção de SPEC | `evidence`, `spec`, `spec-correction` | DeepSeek V4 Flash |
-| Resumo, reparo de resumo | `summary`, `summary-repair` | DeepSeek V4 Pro |
-| Extração e geração de questões | `quiz-extract`, `quiz-generate` | DeepSeek V4 Flash/Pro |
-| Auditorias do fluxo legado e simulados | `spec-audit`, `summary-audit`, `quiz-audit` | Kimi K3 via OpenRouter, ou API direta |
-| Adjudicação difícil | `spec-audit-critical`, `summary-audit-critical`, `quiz-audit-critical` | GPT-5.6 Terra Pro via OpenRouter, ou API direta |
+| SPEC do job de resumo | chamada interna do job | DeepSeek V4 Flash |
+| Resumo final | chamada interna do job | DeepSeek V4 Pro |
+| Extração e geração de questões | papéis internos `quiz-extract`, `quiz-generate` | DeepSeek V4 Flash/Pro |
+| Auditoria de simulados | papel interno `quiz-audit` | Kimi K3 via OpenRouter, ou API direta |
+| Adjudicação difícil de simulados | papel interno `quiz-audit-critical` | GPT-5.6 Terra Pro via OpenRouter, ou API direta |
 
-O auditor primário é definido por `AI_PRIMARY_AUDITOR` nos fluxos legados e de simulado. O resumo otimizado não exige Kimi: ele usa uma revisão humana curta para resolver somente as leituras visuais incertas antes da geração final.
+O auditor primário é definido por `AI_PRIMARY_AUDITOR` no fluxo de simulado. O resumo usa uma revisão humana curta para resolver somente as leituras visuais incertas antes da geração final.
 
 ## Pipeline de resumo
 
-1. Extrair texto localmente com PyMuPDF e tentar OCR local apenas nas páginas sem texto suficiente.
-2. Enviar ao GLM somente as páginas visuais selecionadas e pedir a posição normalizada de cada leitura incerta.
+1. Extrair texto nativo e blocos com coordenadas localmente usando PyMuPDF (escala Matrix 2.2, qualidade JPEG 92) e aplicar OCR local apenas em áreas/páginas com texto insuficiente.
+2. Enviar ao GLM-4.5V somente as páginas visuais selecionadas, fornecendo junto a imagem em alta resolução e o texto nativo/OCR previamente extraído.
+   - Se a página possuir texto nativo: solicitar apenas conteúdo visual adicional (manuscritos, diagramas, tabelas visuais e texto impresso interno a imagens/slides).
+   - Se a página não possuir texto nativo: solicitar transcrição visual completa de todos os elementos visíveis.
 3. Gerar uma SPEC concisa com DeepSeek Flash.
 4. Pausar o job para o usuário revisar a SPEC e confirmar, corrigir ou ignorar cada dúvida diretamente sobre o trecho do PDF.
-5. Gerar o resumo uma única vez com DeepSeek Pro, aplicando as decisões humanas e exigindo citações de página.
-
-O Kimi não participa automaticamente deste fluxo. Isso elimina a chamada de auditoria visual que mais elevava o custo, sem transformar uma leitura incerta em fato silenciosamente.
+5. Gerar o resumo com DeepSeek Pro, aplicando as decisões humanas e exigindo citações de página `(p. X)`.
+6. Executar validação determinística de cobertura por página (`getOmittedPages`). Se páginas com conteúdo substancial forem omitidas, disparar uma única chamada de reparo direcionado (`repairSummaryOmissions`) antes de finalizar.
 
 ## Pipeline de simulado
 
-1. Classificar arquivos em teoria, banco de questões, misto ou dependente de visão.
-2. Indexar o corpus em blocos sem cortar parágrafos sempre que possível.
-3. Distribuir blocos ao longo do material para evitar viés para as primeiras páginas.
-4. Gerar mais candidatos do que o número solicitado.
-5. Exigir `evidenceQuote` literal, arquivo e página em cada candidato.
-6. Localizar a citação no corpus. Valores, unidades e comparadores exigem correspondência literal.
-7. Auditar gabarito, unicidade, distratores e explicação usando somente a evidência fornecida.
-8. Entregar apenas questões aprovadas com nota mínima. Questões reprovadas nunca completam o lote.
+1. Receber os PDFs em job autenticado, validar tamanho/magic bytes e executar o worker PyMuPDF no servidor.
+2. Detectar localmente páginas que precisam de visão e enviar ao GLM somente essas páginas, até o limite de 30.
+3. Classificar arquivos em teoria, banco de questões ou misto.
+4. Indexar o corpus em blocos sem cortar parágrafos e distribuir amostras pelo material.
+5. Gerar candidatos conforme a complexidade: 1,5× no corpus simples, 1,8× no padrão e 2× no complexo.
+6. Exigir `evidenceQuote` literal, arquivo e página em cada candidato.
+7. Localizar a citação no corpus. Valores, unidades e comparadores exigem correspondência literal.
+8. Auditar gabarito, unicidade, distratores e explicação usando somente a evidência fornecida.
+9. Entregar apenas questões aprovadas com nota mínima. Questões reprovadas nunca completam o lote.
+
+Os papéis de geração e auditoria de simulados não são aceitos pelo proxy público. Quantidade, modo, referências, corpus, páginas visuais, chamadas simultâneas e frequência de jobs são normalizados no servidor.
 
 ## Configuração
 

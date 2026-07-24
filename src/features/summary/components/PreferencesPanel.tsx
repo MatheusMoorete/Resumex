@@ -15,13 +15,12 @@ const FORMATS = [
   { id: 'tables', label: 'Tabelas', desc: 'Usa tabelas para comparar critérios, condutas e classificações.' },
   { id: 'qa', label: 'Perguntas e respostas', desc: 'Transforma conteúdo em perguntas para recordação ativa.' },
   { id: 'mnemonics', label: 'Mnemônicos', desc: 'Cria auxiliares de memorização quando o PDF permitir.' },
-  { id: 'flashcards', label: 'Flashcards', desc: 'Gera cartões curtos no estilo frente e verso.' },
 ];
 
 const DETAIL_LEVELS = [
   { id: 'concise', label: 'Conciso', desc: 'Foca no essencial e reduz explicações longas.' },
   { id: 'balanced', label: 'Equilibrado', desc: 'Mantém bom detalhe sem expandir demais.' },
-  { id: 'detailed', label: 'Detalhado', desc: 'Inclui explicações, tabelas e pontos finos do material.' },
+  { id: 'detailed', label: 'Detalhado', desc: 'Preserva explicações, exceções, critérios e pontos finos do material.' },
 ];
 
 function parsePageRanges(value: string, totalPages: number) {
@@ -97,7 +96,7 @@ export default function PreferencesPanel({
 
   const toggleFormat = (id) => {
     setFormats((prev) =>
-      prev.includes(id) ? prev.filter((format) => format !== id) : [...prev, id]
+      prev.includes(id) ? prev.filter((format) => format !== id) : prev.length < 2 ? [...prev, id] : prev
     );
   };
 
@@ -247,7 +246,7 @@ export default function PreferencesPanel({
             <span>02</span>
             <div>
               <h2>Estrutura do resumo</h2>
-              <p>Escolha o método principal e os formatos que ajudam na sua revisão.</p>
+              <p>Escolha o método principal e até dois formatos para sua revisão.</p>
             </div>
           </div>
 
@@ -273,6 +272,7 @@ export default function PreferencesPanel({
                 onClick={() => toggleFormat(format.id)}
                 type="button"
                 aria-pressed={formats.includes(format.id)}
+                disabled={formats.length >= 2 && !formats.includes(format.id)}
                 data-tooltip={format.desc}
               >
                 {format.label}

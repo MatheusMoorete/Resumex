@@ -5,13 +5,15 @@ import { copyToClipboard, stripPageReferences } from '../../../shared/utils/clip
 import { exportSummaryToNotion } from '../../notion/services/notionApi';
 import { resolveCorpusPage } from '../../pdf/services/pdfCorpus';
 
-export default function ResultView({ fileData, pdfUrl, summary, summaryLog = '', missingPages = [], onRegenerateWithCoverage, onNewSummary, onCreateFlashcards }) {
+export default function ResultView({ fileData, pdfUrl, summary, onNewSummary, onGoToFichario, onCreateFlashcards, onCreateQuiz }) {
   const hasPdf = Boolean(fileData?.files?.length || pdfUrl);
-  const [viewMode, setViewMode] = useState(hasPdf ? 'split' : 'preview'); // 'preview' | 'raw' | 'split'
+  const [viewMode, setViewMode] = useState(hasPdf ? 'split' : 'preview');
   const [showToast, setShowToast] = useState(false);
   const [toastMessage, setToastMessage] = useState('');
   const [isSendingToNotion, setIsSendingToNotion] = useState(false);
   const [isCreatingFlashcards, setIsCreatingFlashcards] = useState(false);
+  const [isCreatingQuiz, setIsCreatingQuiz] = useState(false);
+  const [confirmModal, setConfirmModal] = useState(null); // 'flashcards' | 'quiz' | null
   const [activePage, setActivePage] = useState(null);
   const [activeSourceText, setActiveSourceText] = useState('');
   const activePdf = resolveCorpusPage(fileData || { pdfUrl }, activePage || 1);
@@ -61,6 +63,17 @@ export default function ResultView({ fileData, pdfUrl, summary, summaryLog = '',
     }
   };
 
+  const handleCreateQuiz = async () => {
+    setIsCreatingQuiz(true);
+    try {
+      await onCreateQuiz?.();
+    } catch (error) {
+      showToastMessage(error.message || 'Não foi possível criar o simulado.');
+    } finally {
+      setIsCreatingQuiz(false);
+    }
+  };
+
   const handlePageClick = useCallback((pageNumber, sourceText = '') => {
     setActivePage(pageNumber);
     setActiveSourceText(sourceText);
@@ -76,7 +89,13 @@ export default function ResultView({ fileData, pdfUrl, summary, summaryLog = '',
         <div className="result-toolbar-left">
           <div className="result-toolbar-heading">
             <span>RESUMO / FINALIZADO</span>
-            <button className="btn btn-ghost" onClick={onNewSummary}>Novo resumo</button>
+            <button
+              className="result-toolbar-back-btn"
+              onClick={onGoToFichario || onNewSummary}
+              title="Ir para o fichário de resumos"
+            >
+              Ir para resumos
+            </button>
           </div>
           <div className="result-tab-group">
             {hasPdf && (
@@ -94,19 +113,11 @@ export default function ResultView({ fileData, pdfUrl, summary, summaryLog = '',
               Resumo
             </button>
             <button
-              className={`result-tab ${viewMode === 'raw' ? 'active' : ''}`}
-              onClick={() => setViewMode('raw')}
+              className={`result-tab ${viewMode === 'notion' ? 'active' : ''}`}
+              onClick={() => setViewMode('notion')}
             >
-              Markdown
+              Notion
             </button>
-            {summaryLog && (
-              <button
-                className={`result-tab ${viewMode === 'log' ? 'active' : ''}`}
-                onClick={() => setViewMode('log')}
-              >
-                Auditoria
-              </button>
-            )}
           </div>
         </div>
 
@@ -118,43 +129,20 @@ export default function ResultView({ fileData, pdfUrl, summary, summaryLog = '',
           )}
           <button
             className="btn btn-secondary"
-            onClick={handleCreateFlashcards}
+            onClick={() => setConfirmModal('flashcards')}
             disabled={isCreatingFlashcards}
           >
             {isCreatingFlashcards ? 'Criando flashcards…' : 'Criar flashcards'}
           </button>
           <button
             className="btn btn-secondary"
-            onClick={handleSendToNotion}
-            disabled={isSendingToNotion}
-            id="notion-button"
+            onClick={() => setConfirmModal('quiz')}
+            disabled={isCreatingQuiz}
           >
-            {isSendingToNotion ? 'Enviando...' : 'Enviar ao Notion'}
-          </button>
-          <button className="btn btn-primary" onClick={handleCopy} id="copy-button">
-            Copiar para o Notion
+            {isCreatingQuiz ? 'Criando simulado…' : 'Criar simulado'}
           </button>
         </div>
       </div>
-
-      {missingPages && missingPages.length > 0 && (
-        <div className="coverage-warning-bar animate-fade-in">
-          <div className="coverage-warning-content">
-            <span className="coverage-warning-icon">!</span>
-            <div className="coverage-warning-text">
-              <strong>Alerta de Cobertura Global:</strong> O resumo gerado omitiu as seguintes paginas do PDF:{' '}
-              <strong className="coverage-warning-pages">{missingPages.join(', ')}</strong>.
-            </div>
-          </div>
-          <button
-            className="btn btn-warning btn-sm"
-            onClick={onRegenerateWithCoverage}
-            id="btn-re-coverage"
-          >
-            Regerar com reforço de cobertura
-          </button>
-        </div>
-      )}
 
       <div className={`result-body is-${viewMode}`}>
         {viewMode === 'split' && activePdf.pdfUrl && (
@@ -168,16 +156,32 @@ export default function ResultView({ fileData, pdfUrl, summary, summaryLog = '',
         )}
 
         <div className="result-panel result-panel-summary">
-          {viewMode === 'log' ? (
-            <div className="result-log-panel">
-              <div className="result-log-header">
-                <span>Log de qualidade</span>
-                <p>Esta seção é operacional e não será enviada ao Notion nem copiada como resumo.</p>
+          {viewMode === 'notion' ? (
+            <div className="notion-export-panel">
+              <div className="notion-export-header">
+                <span className="notion-export-badge">NOTION EXPORT</span>
+                <h3 className="notion-export-title">Exportar para o Notion</h3>
+                <p className="notion-export-desc">
+                  Este resumo foi formatado em Markdown compatível com o Notion (toggles, callouts, tabelas e listas).
+                  Clique no botão abaixo para copiar o resumo e cole diretamente em qualquer página do Notion (<kbd className="kbd-key">Ctrl</kbd> + <kbd className="kbd-key">V</kbd> / <kbd className="kbd-key">Cmd</kbd> + <kbd className="kbd-key">V</kbd>).
+                </p>
+                <div className="notion-export-actions">
+                  <button className="btn btn-primary" onClick={handleCopy} id="copy-button">
+                    Copiar para o Notion
+                  </button>
+                  <button
+                    className="btn btn-secondary"
+                    onClick={handleSendToNotion}
+                    disabled={isSendingToNotion}
+                    id="notion-button"
+                  >
+                    {isSendingToNotion ? 'Enviando...' : 'Enviar ao Notion'}
+                  </button>
+                </div>
               </div>
-              <MarkdownPreview content={summaryLog} />
+
+              <div className="markdown-raw">{stripPageReferences(summary)}</div>
             </div>
-          ) : viewMode === 'raw' ? (
-            <div className="markdown-raw">{stripPageReferences(summary)}</div>
           ) : (
             <MarkdownPreview content={summary} onPageClick={handlePageClick} />
           )}
@@ -187,6 +191,80 @@ export default function ResultView({ fileData, pdfUrl, summary, summaryLog = '',
       {showToast && (
         <div className="copy-toast">
           {toastMessage}
+        </div>
+      )}
+
+      {confirmModal && (
+        <div
+          className="home-confirmation-overlay"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setConfirmModal(null);
+          }}
+        >
+          <section
+            className="home-confirmation-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="confirm-dialog-title"
+          >
+            {confirmModal === 'flashcards' ? (
+              <>
+                <span className="home-confirmation-kicker">CRIAR FLASHCARDS?</span>
+                <h2 id="confirm-dialog-title">Gerar baralho de flashcards?</h2>
+                <p>
+                  Serão criados cartões de estudo e memorização ativa baseados nos tópicos e conceitos principais deste resumo para você praticar no seu fichário.
+                </p>
+                <div className="home-confirmation-actions">
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    onClick={() => setConfirmModal(null)}
+                  >
+                    Continuar aqui
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    onClick={() => {
+                      setConfirmModal(null);
+                      handleCreateFlashcards();
+                    }}
+                    disabled={isCreatingFlashcards}
+                  >
+                    {isCreatingFlashcards ? 'Criando…' : 'Gerar flashcards'}
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <span className="home-confirmation-kicker">CRIAR SIMULADO?</span>
+                <h2 id="confirm-dialog-title">Gerar simulado de questões?</h2>
+                <p>
+                  Será criado um teste objetivo com questões de múltipla escolha e gabarito comentado com base no conteúdo deste material.
+                </p>
+                <div className="home-confirmation-actions">
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    onClick={() => setConfirmModal(null)}
+                  >
+                    Continuar aqui
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    onClick={() => {
+                      setConfirmModal(null);
+                      handleCreateQuiz();
+                    }}
+                    disabled={isCreatingQuiz}
+                  >
+                    {isCreatingQuiz ? 'Criando…' : 'Gerar simulado'}
+                  </button>
+                </div>
+              </>
+            )}
+          </section>
         </div>
       )}
     </div>

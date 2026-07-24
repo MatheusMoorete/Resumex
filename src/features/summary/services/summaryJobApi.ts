@@ -106,7 +106,7 @@ export async function prepareSummaryJob({
     created.id,
     signal,
     onProgress,
-    (job: Job) => job.status === 'awaiting_review'
+    (job: Job) => job.status === 'awaiting_review' || job.status === 'completed'
   );
 }
 

@@ -2,10 +2,12 @@
 
 ## Onde mexer
 
-- `components/QuizUpload.tsx`: arquivos e opções.
+- `components/QuizUpload.tsx`: arquivos e opções; a detecção visual acontece automaticamente no servidor.
 - `components/QuizProcessingTimeline.tsx`: progresso.
 - `components/QuizView.tsx`: execução, resultado e novas variantes.
-- `services/quizApi.ts`: classificação, extração, geração, localização de evidência e auditoria.
+- `services/quizJobApi.ts`: upload autenticado, início, polling e cancelamento do job.
+- `services/quizApi.ts`: lógica reutilizada pelo servidor para classificação, extração, geração, localização de evidência e auditoria.
+- `server/quizJobs.ts`: limites, fila, worker PDF, leitura visual e chamadas internas aos provedores.
 
 ## Invariantes
 
@@ -16,6 +18,7 @@
 - Bancos de questões servem como referência de estilo ou fonte de questões conforme a opção escolhida; não misture os modos silenciosamente.
 - Não corte parágrafos ao montar blocos quando houver alternativa simples e distribua amostras pelo corpus inteiro.
 - Preserve cancelamento via `AbortSignal` em chamadas novas.
+- Geração e auditoria não podem voltar ao proxy público; somente o job server-side escolhe papéis, modelos e orçamentos.
 
 ## Verificação
 

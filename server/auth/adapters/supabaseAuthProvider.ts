@@ -1,13 +1,24 @@
-import { createClient } from '@supabase/supabase-js';
+import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
-export function createSupabaseAuthProvider(env) {
+export interface AuthUser {
+  id: string;
+  email: string | null;
+}
+
+export interface AuthProvider {
+  name: string;
+  isConfigured: boolean;
+  verifyToken(token: string): Promise<AuthUser | null>;
+}
+
+export function createSupabaseAuthProvider(env: Record<string, string | undefined>): AuthProvider {
   const debugEnabled = env.AUTH_DEBUG === 'true';
-  const debug = (event, details = {}) => {
+  const debug = (event: string, details: Record<string, any> = {}) => {
     if (debugEnabled) console.info(`[auth:server] ${event}`, details);
   };
   const url = env.SUPABASE_URL || env.VITE_SUPABASE_URL || '';
   const publishableKey = env.SUPABASE_PUBLISHABLE_KEY || env.VITE_SUPABASE_PUBLISHABLE_KEY || '';
-  const client = url && publishableKey
+  const client: SupabaseClient | null = url && publishableKey
     ? createClient(url, publishableKey, {
         auth: { persistSession: false, autoRefreshToken: false },
       })
@@ -22,7 +33,7 @@ export function createSupabaseAuthProvider(env) {
     name: 'supabase',
     isConfigured: Boolean(client),
 
-    async verifyToken(token) {
+    async verifyToken(token: string): Promise<AuthUser | null> {
       if (!client || !token) {
         debug('token verification skipped', {
           reason: !client ? 'provider_not_configured' : 'token_missing',
