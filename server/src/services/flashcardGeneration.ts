@@ -9,7 +9,7 @@ const CandidateSchema = z.object({
   sourcePage: z.coerce.number().int().min(1),
   evidenceQuote: z.string().min(20).max(2000),
 });
-const PayloadSchema = z.object({ cards: z.array(CandidateSchema).max(90) });
+const PayloadSchema = z.object({ cards: z.array(z.unknown()).max(90) });
 
 export type GeneratedFlashcardDraft = Omit<z.infer<typeof CandidateSchema>, 'sourcePage'> & {
   sourceType: 'summary' | 'external_text' | 'pdf';
@@ -44,7 +44,10 @@ export function validateFlashcardCandidates(
   const seen = new Set<string>();
   const valid: GeneratedFlashcardDraft[] = [];
 
-  for (const candidate of parsed.cards) {
+  for (const rawCandidate of parsed.cards) {
+    const candidateResult = CandidateSchema.safeParse(rawCandidate);
+    if (!candidateResult.success) continue;
+    const candidate = candidateResult.data;
     const file = matchingFile(files, candidate.sourceName);
     const pageText = file?.pageTexts[candidate.sourcePage - 1];
     const quote = collapse(candidate.evidenceQuote);

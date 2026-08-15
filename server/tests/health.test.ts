@@ -150,6 +150,13 @@ describe('Server Modular Health & Utilities (TypeScript)', () => {
     }];
     const raw = { cards: [
       {
+        front: 'Qual cartão deve ser descartado?',
+        back: 'Este.',
+        sourceName: 'venosas.pdf',
+        sourcePage: 1,
+        evidenceQuote: 'Trecho curto.',
+      },
+      {
         front: 'Qual é a compressão recomendada?',
         back: '30 mmHg.',
         sourceName: 'venosas.pdf',
