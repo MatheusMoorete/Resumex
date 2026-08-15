@@ -4,7 +4,7 @@ Aplicação React + Vite para transformar PDFs médicos em resumos e quizzes com
 
 ## Requisitos
 
-- Node.js 20.9 ou superior (Node 22 LTS recomendado)
+- Node.js 22 ou superior
 - npm
 
 ## Desenvolvimento

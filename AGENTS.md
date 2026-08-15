@@ -5,9 +5,11 @@ Este arquivo vale para todo o repositório. Um `AGENTS.md` mais próximo do arqu
 ## Comece aqui
 
 - Produto: aplicação médica que transforma até 5 PDFs em resumo rastreável, simulado e flashcards.
-- Runtime: Node.js 20.9+, React 19, Vite, TypeScript no frontend, Express em JavaScript e Python 3 com PyMuPDF no worker.
+- Runtime: Node.js 22+, React 19, Vite, TypeScript no frontend e no backend Express, e Python 3 com PyMuPDF no worker.
 - Entrada web: `src/main.tsx`. Composição do app autenticado: `src/app/App.tsx`.
-- API: `server/index.js`. Jobs de resumo: `server/summaryJobs.js`. Extração Python: `worker/process_pdf.py`.
+- API: `server/index.ts`. Jobs de resumo: `server/summaryJobs.ts`. Extração Python: `worker/process_pdf.py`.
+- Antes de alterar o backend, leia `docs/backend-technical-debt.md`. Ele separa o fluxo ativo da camada V2 ainda não integrada.
+- A ponte V2 é opt-in e cobre somente resumos com um PDF: original/lifecycle persistem, o worker gera um Document IR validado e o provider de resumo persiste o resultado. Multi-PDF, providers de planejamento/visão, páginas/blocos/fontes relacionais e recuperação após restart continuam no caminho legado/incompleto.
 - Leia `docs/ai-quality-architecture.md` antes de alterar prompts, auditoria, modelos ou critérios médicos.
 - Leia `docs/deployment-portability.md` antes de alterar Docker, Render, Caddy ou Hostinger.
 
@@ -47,7 +49,7 @@ npm run typecheck
 npm run build
 npm run check:flashcards
 # Use python3 no Linux/Docker ou o Python configurado em PYTHON_BIN.
-python worker/process_pdf.py --self-test
+python -m unittest discover -s worker -p "test_*.py"
 npm run test
 ```
 

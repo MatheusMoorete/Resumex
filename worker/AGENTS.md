@@ -1,6 +1,8 @@
 # Worker Python de PDF
 
-`process_pdf.py` é um processo filho chamado por `server/summaryJobs.js`.
+`process_pdf.py` é um processo filho chamado por `server/summaryJobs.ts` e `server/quizJobs.ts`.
+
+Leia `../docs/backend-technical-debt.md` antes de alterar o protocolo. Os jobs ativos ainda usam a interface legada; a interface `--input/--output/--artifacts-dir` e o `Document IR` novo ainda não estão integrados a eles.
 
 ## Contrato
 
@@ -24,7 +26,7 @@
 
 ```powershell
 # Use python3 no Linux/Docker ou o Python configurado em PYTHON_BIN.
-python worker/process_pdf.py --self-test
+python -m unittest discover -s worker -p "test_*.py"
 ```
 
-Se o manifesto mudar, atualize também `server/summaryJobs.js` e o guia do domínio de resumo.
+Se o manifesto ou o protocolo legado mudar, atualize também `server/summaryJobs.ts`, `server/quizJobs.ts` e os testes Node que invocam o worker.

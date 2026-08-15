@@ -16,7 +16,7 @@
     "start": "tsx server/index.ts"
   },
   "engines": {
-    "node": ">=20.9.0"
+    "node": ">=22.0.0"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.110.7",

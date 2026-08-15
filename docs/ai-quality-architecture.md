@@ -49,6 +49,16 @@ O auditor primário é definido por `AI_PRIMARY_AUDITOR` no fluxo de simulado. O
 5. Gerar o resumo com DeepSeek Pro, aplicando as decisões humanas e exigindo citações de página `(p. X)`.
 6. Executar validação determinística de cobertura por página (`getOmittedPages`). Se páginas com conteúdo substancial forem omitidas, disparar uma única chamada de reparo direcionado (`repairSummaryOmissions`) antes de finalizar.
 
+### Corte V2 opt-in
+
+Para um único PDF e com `SUMMARY_PIPELINE_PERSISTENCE_ENABLED=true`, a síntese usa
+o contrato `SummaryProvider.generateSection` como uma seção única editável pela SPEC
+atual. A resposta passa por Zod, exige claims com fonte de página válida, rejeita
+truncamento e executa no máximo um reparo estruturado; cobertura ainda ausente falha
+fechado. O resultado é persistido em `summary_versions`. A rastreabilidade neste
+corte é por página; `summary_sources` só deve ser ativada junto da persistência
+idempotente dos blocos do Document IR.
+
 ## Pipeline de simulado
 
 1. Receber os PDFs em job autenticado, validar tamanho/magic bytes e executar o worker PyMuPDF no servidor.

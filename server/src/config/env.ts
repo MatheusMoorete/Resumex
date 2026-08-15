@@ -20,6 +20,7 @@ export const notionApiVersion: string = process.env.NOTION_API_VERSION || '2022-
 export const e2eMockAuthEnabled: boolean = process.env.E2E_MOCK_AUTH === 'true';
 export const e2eNotionMockEnabled: boolean = process.env.E2E_NOTION_MOCK === 'true';
 export const e2eNotionMockPath: string = path.join(rootDir, 'tmp', 'notion-export-mock.json');
+export const summaryPipelinePersistenceEnabled: boolean = process.env.SUMMARY_PIPELINE_PERSISTENCE_ENABLED === 'true';
 
 export function getProviderKey(primaryName: string, legacyName: string): string {
   if (process.env[primaryName]) return process.env[primaryName]!;

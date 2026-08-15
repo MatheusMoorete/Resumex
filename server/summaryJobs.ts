@@ -7,6 +7,19 @@ import os from 'node:os';
 import path from 'node:path';
 import { telemetry } from './src/services/telemetry.js';
 import { rateLimit } from './src/middlewares/rateLimit.js';
+import { summaryPipelinePersistenceEnabled } from './src/config/env.js';
+import { getSupabaseAdminClient } from './src/config/database.js';
+import {
+  createSummaryProcessingJob,
+  persistSummaryResult,
+  recordDocumentIrMetadata,
+  storeSummaryDocument,
+  updateSummaryProcessingJob,
+} from './src/services/summaryPersistence.js';
+import { DocumentIRSchema, type DocumentIR } from './src/schemas/documentIr.js';
+import { AIRouter } from './src/ai/router.js';
+import type { SummaryProvider } from './src/ai/types.js';
+import type { SectionSummaryOutput } from './src/ai/schemas/sectionSummarySchema.js';
 
 const runFile = promisify(execFile);
 const router: Router = express.Router();
@@ -30,6 +43,9 @@ export interface SummaryJob {
   pages?: any[];
   resolvedAnswers?: Record<string, string>;
   totalTokens?: number;
+  persistenceRequested?: boolean;
+  documentId?: string;
+  persisted?: boolean;
 }
 
 const jobs = new Map<string, SummaryJob>();
@@ -99,6 +115,45 @@ function ownedJob(req: Request, res: Response): SummaryJob | null {
 
 function update(job: SummaryJob, values: Partial<SummaryJob>): void {
   Object.assign(job, values, { updatedAt: Date.now() });
+}
+
+async function transition(job: SummaryJob, values: Partial<SummaryJob>): Promise<void> {
+  if (job.persisted) {
+    const client = getSupabaseAdminClient();
+    if (!client) {
+      throw new Error('A persistência do processamento está indisponível.');
+    }
+    const next = { ...job, ...values };
+    try {
+      await updateSummaryProcessingJob(client, {
+        jobId: job.id,
+        documentId: job.documentId,
+        userId: job.userId,
+        status: next.status as 'queued' | 'processing' | 'awaiting_review' | 'completed' | 'failed',
+        stage: next.stage,
+        progress: next.progress,
+        error: next.error,
+      });
+    } catch (error) {
+      console.error(`[job:${job.id}] Failed to persist state`, error);
+      throw new Error('Não foi possível salvar o estado do processamento.');
+    }
+  }
+  update(job, values);
+}
+
+async function failJob(job: SummaryJob, stage: string, error: unknown): Promise<void> {
+  const values: Partial<SummaryJob> = {
+    status: 'failed',
+    stage,
+    error: error instanceof Error ? error.message : 'Erro interno durante o resumo.',
+  };
+  try {
+    await transition(job, values);
+  } catch (persistenceError) {
+    console.error(`[job:${job.id}] Failed to persist terminal state`, persistenceError);
+    update(job, values);
+  }
 }
 
 function textContent(response: any): string {
@@ -391,6 +446,45 @@ export function normalizePreferences(input: any) {
   };
 }
 
+export function documentIrToLegacyPages(
+  documentIr: DocumentIR,
+  artifactsDir: string,
+  sourceName: string,
+  preferences: { handwritingMode: string; manualVisionPages: number[] }
+) {
+  const manualPages = new Set(preferences.manualVisionPages);
+  return documentIr.pages.map((page) => {
+    const reasons = page.processingPlan.reasons;
+    const needsVision = preferences.handwritingMode === 'all'
+      || (preferences.handwritingMode === 'manual' && manualPages.has(page.pageNumber))
+      || (preferences.handwritingMode === 'auto' && reasons.length > 0);
+    const preview = page.rasterReferences.find((reference) => reference.id === `p${page.pageNumber}-preview`);
+    const blocks = [...page.blocks].sort((a, b) => a.readingOrder - b.readingOrder);
+
+    return {
+      page: page.pageNumber,
+      sourceIndex: 0,
+      sourceName,
+      sourcePage: page.pageNumber,
+      text: blocks.map((block) => block.text).filter(Boolean).join('\n'),
+      blocks: blocks.map((block) => ({
+        bbox: [
+          Number((block.bbox.x0 / page.width).toFixed(4)),
+          Number((block.bbox.y0 / page.height).toFixed(4)),
+          Number((block.bbox.x1 / page.width).toFixed(4)),
+          Number((block.bbox.y1 / page.height).toFixed(4)),
+        ],
+        text: block.text,
+        type: block.type === 'image' ? 'image' : 'text',
+      })),
+      ocrUsed: blocks.some((block) => ['local_ocr', 'cloud_ocr'].includes(block.source)),
+      needsVision,
+      reasons,
+      imagePath: needsVision && preview ? path.join(artifactsDir, preview.path) : null,
+    };
+  });
+}
+
 export function preferenceInstructions(preferences: any) {
   const formats = new Set<string>(preferences.formats);
   const rules = [
@@ -513,6 +607,85 @@ export function getOmittedPages(pages: any[], summary: string): any[] {
   });
 }
 
+function validateProviderClaims(output: { claims: Array<{ sourceBlockIds: string[] }> }, sourceIds: Set<string>): void {
+  if (!output.claims.length) {
+    throw new Error('O provider não retornou rastreabilidade para as afirmações do resumo.');
+  }
+  if (output.claims.some((claim) => !claim.sourceBlockIds.length || claim.sourceBlockIds.some((id) => !sourceIds.has(id)))) {
+    throw new Error('O provider retornou uma afirmação sem fonte válida.');
+  }
+}
+
+export async function generateValidatedProviderSummary(
+  provider: SummaryProvider,
+  input: {
+    jobId: string;
+    documentId: string;
+    pages: any[];
+    spec: string;
+    preferences: any;
+    answersText: string;
+  }
+) {
+  // ponytail: um bloco por página até os blocos do IR terem persistência idempotente; depois use os stable keys do IR.
+  const sourceBlocks = input.pages.map((page) => ({
+    id: `page-${page.page}`,
+    pageNumber: page.page,
+    text: pageContext(page),
+  }));
+  const sourceIds = new Set(sourceBlocks.map((block) => block.id));
+  const sectionPlan = {
+    key: 'summary',
+    title: 'Resumo',
+    objective: [input.spec, input.answersText].filter(Boolean).join('\n\n'),
+    sourceBlockIds: [...sourceIds],
+    sourcePages: input.pages.map((page) => page.page),
+    priority: 1,
+    estimatedTokens: 12000,
+  };
+  let response = await provider.generateSection({
+    jobId: input.jobId,
+    documentId: input.documentId,
+    operationId: 'summary-validated',
+    input: { sectionPlan, sourceBlocks, preferences: input.preferences },
+    modelOptions: { model: MODELS.deepseek, maxTokens: 16000 },
+    timeoutMs: Number(process.env.AI_UPSTREAM_TIMEOUT_MS || 600000),
+  });
+  if (response.output.sectionKey !== sectionPlan.key) {
+    throw new Error('O provider retornou uma seção diferente da solicitada.');
+  }
+  validateProviderClaims(response.output, sourceIds);
+
+  let summary = cleanSummaryOutput(response.output.markdown);
+  const omittedPages = getOmittedPages(input.pages, summary);
+  if (omittedPages.length) {
+    const omittedIds = new Set(omittedPages.map((page) => `page-${page.page}`));
+    const repair = await provider.repairSection({
+      jobId: input.jobId,
+      documentId: input.documentId,
+      operationId: 'summary-repair-validated',
+      input: {
+        existingSection: response.output,
+        omittedBlocks: sourceBlocks.filter((block) => omittedIds.has(block.id)),
+        preferences: input.preferences,
+      },
+      modelOptions: { model: MODELS.deepseek, maxTokens: 16000 },
+      timeoutMs: Number(process.env.AI_UPSTREAM_TIMEOUT_MS || 600000),
+    });
+    if (repair.output.sectionKey !== sectionPlan.key) {
+      throw new Error('O reparo retornou uma seção diferente da solicitada.');
+    }
+    validateProviderClaims(repair.output, sourceIds);
+    summary = cleanSummaryOutput(repair.output.markdown);
+    if (getOmittedPages(input.pages, summary).length) {
+      throw new Error('O resumo validado não cobriu todas as páginas relevantes.');
+    }
+    response = { ...repair, output: { ...repair.output, unusedBlockIds: [] } as SectionSummaryOutput };
+  }
+
+  return { summary, response };
+}
+
 export function cleanSummaryOutput(text: string): string {
   if (!text) return '';
   let cleaned = text.trim();
@@ -629,7 +802,7 @@ async function runJobPipeline(jobId: string) {
   if (!job) return;
 
   try {
-    update(job, { status: 'processing', stage: 'Extraindo texto dos PDFs...', progress: 10 });
+    await transition(job, { status: 'processing', stage: 'Extraindo texto dos PDFs...', progress: 10 });
 
     const filePaths = (job.files || [])
       .map((f: any, index: number) => f?.path || path.join(job.dir, `file-${index}.pdf`))
@@ -647,27 +820,62 @@ async function runJobPipeline(jobId: string) {
       }
     }
 
-    const args = [
-      WORKER_PATH,
-      ...filePaths,
-      '--output-dir',
-      job.dir,
-      '--vision-mode',
-      job.preferences.handwritingMode,
-      '--max-vision-pages',
-      String(MAX_VISION_PAGES),
-    ];
-    if (job.preferences.manualVisionPages.length) {
-      args.push('--vision-pages', job.preferences.manualVisionPages.join(','));
-    }
+    if (job.persistenceRequested && job.documentId && filePaths.length === 1) {
+      const outputPath = path.join(job.dir, 'document-ir.json');
+      const artifactsDir = path.join(job.dir, 'artifacts');
+      await runFile(PYTHON_BIN, [
+        WORKER_PATH,
+        '--input', filePaths[0],
+        '--output', outputPath,
+        '--artifacts-dir', artifactsDir,
+        '--document-id', job.documentId,
+        '--schema-version', '1.0.0',
+        '--max-pages', '300',
+        '--max-file-size', '50',
+      ], {
+        maxBuffer: 10 * 1024 * 1024,
+        env: { ...process.env, PYTHONIOENCODING: 'utf-8' },
+        timeout: 10 * 60 * 1000,
+      });
+      const documentIr = DocumentIRSchema.parse(JSON.parse(await fs.readFile(outputPath, 'utf-8')));
+      if (documentIr.documentId !== job.documentId) {
+        throw new Error('O Document IR retornou um identificador de documento inválido.');
+      }
+      job.pages = documentIrToLegacyPages(documentIr, artifactsDir, job.files?.[0]?.name || 'document.pdf', job.preferences);
 
-    const { stdout } = await runFile(PYTHON_BIN, args, {
-      maxBuffer: 10 * 1024 * 1024,
-      env: { ...process.env, PYTHONIOENCODING: 'utf-8' },
-      timeout: 10 * 60 * 1000,
-    });
-    const pdfData = JSON.parse(stdout);
-    job.pages = pdfData.pages || [];
+      const client = getSupabaseAdminClient();
+      if (!client) throw new Error('A persistência do processamento está indisponível.');
+      await recordDocumentIrMetadata(client, {
+        jobId: job.id,
+        documentId: job.documentId,
+        userId: job.userId,
+        pageCount: documentIr.pageCount,
+        schemaVersion: documentIr.schemaVersion,
+        sourceHash: documentIr.sourceHash,
+      });
+    } else {
+      const args = [
+        WORKER_PATH,
+        ...filePaths,
+        '--output-dir',
+        job.dir,
+        '--vision-mode',
+        job.preferences.handwritingMode,
+        '--max-vision-pages',
+        String(MAX_VISION_PAGES),
+      ];
+      if (job.preferences.manualVisionPages.length) {
+        args.push('--vision-pages', job.preferences.manualVisionPages.join(','));
+      }
+
+      const { stdout } = await runFile(PYTHON_BIN, args, {
+        maxBuffer: 10 * 1024 * 1024,
+        env: { ...process.env, PYTHONIOENCODING: 'utf-8' },
+        timeout: 10 * 60 * 1000,
+      });
+      const pdfData = JSON.parse(stdout);
+      job.pages = pdfData.pages || [];
+    }
 
     const visionPages = job.pages.filter((p: any) => p.needsVision);
     if (visionPages.length > MAX_VISION_PAGES && job.preferences.readHandwriting) {
@@ -677,7 +885,7 @@ async function runJobPipeline(jobId: string) {
       );
     }
     if (visionPages.length > 0 && job.preferences.readHandwriting) {
-      update(job, { stage: `Processando visualmente ${visionPages.length} páginas...`, progress: 30 });
+      await transition(job, { stage: `Processando visualmente ${visionPages.length} páginas...`, progress: 30 });
       const visualResults = await mapTwoAtATime(visionPages, async (page: any) => {
         return readVisualPage(page);
       });
@@ -703,18 +911,14 @@ async function runJobPipeline(jobId: string) {
     job.spec = spec;
 
     if (questions.length > 0 && !job.resolvedAnswers) {
-      update(job, { status: 'awaiting_review', stage: 'Aguardando confirmação de leituras visuais e plano.', progress: 75 });
+      await transition(job, { status: 'awaiting_review', stage: 'Aguardando confirmação de leituras visuais e plano.', progress: 75 });
       return;
     }
 
     await continueJobPipeline(jobId);
   } catch (error) {
     console.error(`[job:${jobId}] Pipeline failed`, error);
-    update(job, {
-      status: 'failed',
-      stage: 'Falha no processamento.',
-      error: error instanceof Error ? error.message : 'Erro interno durante o resumo.',
-    });
+    await failJob(job, 'Falha no processamento.', error);
   }
 }
 
@@ -727,25 +931,53 @@ async function continueJobPipeline(jobId: string) {
 
     let spec = job.spec;
     if (!spec) {
-      update(job, { status: 'processing', stage: 'Extraindo plano de estruturação...', progress: 65 });
+      await transition(job, { status: 'processing', stage: 'Extraindo plano de estruturação...', progress: 65 });
       const specResult = await extractSpec(corpusText, job.preferences);
       spec = specResult.spec;
       job.spec = spec;
     }
 
-    update(job, { status: 'processing', stage: 'Sintetizando resumo final para o Notion...', progress: 85 });
+    await transition(job, { status: 'processing', stage: 'Sintetizando resumo final para o Notion...', progress: 85 });
 
     const answersText = resolvedAnswersText(job.resolvedAnswers || {});
-    let { summary } = await generateSummary(corpusText, spec, job.preferences, answersText);
+    let summary: string;
 
-    const omittedPages = getOmittedPages(job.pages || [], summary);
-    if (omittedPages.length > 0) {
-      console.log(`[job:${jobId}] ${omittedPages.length} páginas omitidas detectadas. Executando chamada de reparo direcionada...`);
-      update(job, { status: 'processing', stage: `Executando reparo de cobertura para ${omittedPages.length} página(s)...`, progress: 95 });
-      summary = await repairSummaryOmissions(summary, omittedPages, job.preferences);
+    if (job.persisted && job.documentId) {
+      const validated = await generateValidatedProviderSummary(new AIRouter().summary, {
+        jobId: job.id,
+        documentId: job.documentId,
+        pages: job.pages || [],
+        spec,
+        preferences: job.preferences,
+        answersText,
+      });
+      summary = validated.summary;
+
+      const client = getSupabaseAdminClient();
+      if (!client) throw new Error('A persistência do processamento está indisponível.');
+      await persistSummaryResult(client, {
+        jobId: job.id,
+        documentId: job.documentId,
+        markdown: summary,
+        provider: validated.response.provider,
+        model: validated.response.model,
+        modelVersion: validated.response.modelVersion,
+        promptVersion: validated.response.promptVersion,
+        claims: validated.response.output.claims,
+        warnings: [...validated.response.warnings, ...validated.response.output.warnings],
+      });
+    } else {
+      ({ summary } = await generateSummary(corpusText, spec, job.preferences, answersText));
+
+      const omittedPages = getOmittedPages(job.pages || [], summary);
+      if (omittedPages.length > 0) {
+        console.log(`[job:${jobId}] ${omittedPages.length} páginas omitidas detectadas. Executando chamada de reparo direcionada...`);
+        await transition(job, { status: 'processing', stage: `Executando reparo de cobertura para ${omittedPages.length} página(s)...`, progress: 95 });
+        summary = await repairSummaryOmissions(summary, omittedPages, job.preferences);
+      }
     }
 
-    update(job, {
+    await transition(job, {
       status: 'completed',
       stage: 'Resumo concluído!',
       progress: 100,
@@ -753,11 +985,7 @@ async function continueJobPipeline(jobId: string) {
     });
   } catch (error) {
     console.error(`[job:${jobId}] Synthesis failed`, error);
-    update(job, {
-      status: 'failed',
-      stage: 'Falha na síntese de IA.',
-      error: error instanceof Error ? error.message : 'Erro durante a síntese de IA.',
-    });
+    await failJob(job, 'Falha na síntese de IA.', error);
   }
 }
 
@@ -791,6 +1019,12 @@ router.post('/', async (req: Request, res: Response) => {
     return;
   }
 
+  const persistenceRequested = summaryPipelinePersistenceEnabled && rawFiles.length === 1;
+  if (persistenceRequested && !getSupabaseAdminClient()) {
+    res.status(503).json({ error: { message: 'A persistência do processamento não está configurada.' } });
+    return;
+  }
+
   const jobId = randomUUID();
   const jobDir = path.join(os.tmpdir(), `resumex-job-${jobId}`);
   await fs.mkdir(jobDir, { recursive: true });
@@ -816,6 +1050,7 @@ router.post('/', async (req: Request, res: Response) => {
     updatedAt: Date.now(),
     files: fileObjects,
     preferences: normalizePreferences(req.body?.preferences),
+    persistenceRequested,
   };
 
   jobs.set(jobId, job);
@@ -848,7 +1083,37 @@ router.put('/:id/files/:index', express.raw({ type: ['application/pdf', 'applica
     res.status(400).json({ error: { message: 'Arquivo PDF inválido ou tamanho diferente do declarado.' } });
     return;
   }
+
+  if (job.documentId && fileObj.uploaded) {
+    res.json({ ok: true, job: publicJob(job) });
+    return;
+  }
+
   await fs.writeFile(fileObj.path, buffer);
+
+  if (job.persistenceRequested) {
+    const client = getSupabaseAdminClient();
+    if (!client) {
+      await fs.rm(fileObj.path, { force: true });
+      res.status(503).json({ error: { message: 'A persistência do processamento não está configurada.' } });
+      return;
+    }
+    try {
+      const stored = await storeSummaryDocument(client, {
+        jobId: job.id,
+        userId: job.userId,
+        originalName: fileObj.name,
+        buffer,
+      });
+      job.documentId = stored.documentId;
+    } catch (error) {
+      console.error(`[job:${job.id}] Failed to persist uploaded PDF`, error);
+      await fs.rm(fileObj.path, { force: true });
+      res.status(503).json({ error: { message: 'Não foi possível armazenar o PDF. Tente novamente.' } });
+      return;
+    }
+  }
+
   fileObj.uploaded = true;
   update(job, { stage: `Arquivo ${index + 1} de ${job.files.length} recebido.` });
 
@@ -867,6 +1132,28 @@ router.post('/:id/start', startJobRateLimit, async (req: Request, res: Response)
   if (!job.files?.length || job.files.some((file) => !file.uploaded)) {
     res.status(400).json({ error: { message: 'Envie todos os PDFs antes de iniciar o job.' } });
     return;
+  }
+
+  if (job.persistenceRequested) {
+    const client = getSupabaseAdminClient();
+    if (!client || !job.documentId) {
+      res.status(503).json({ error: { message: 'O documento persistente não está disponível.' } });
+      return;
+    }
+    try {
+      await createSummaryProcessingJob(client, {
+        jobId: job.id,
+        documentId: job.documentId,
+        userId: job.userId,
+        stage: 'Na fila de processamento...',
+        progress: 5,
+      });
+      job.persisted = true;
+    } catch (error) {
+      console.error(`[job:${job.id}] Failed to create persisted job`, error);
+      res.status(503).json({ error: { message: 'Não foi possível registrar o processamento. Tente novamente.' } });
+      return;
+    }
   }
 
   update(job, { status: 'queued', stage: 'Na fila de processamento...', progress: 5 });
@@ -931,7 +1218,12 @@ const handleFinalize = async (req: Request, res: Response) => {
     return;
   }
 
-  update(job, { status: 'processing', stage: 'Sintetizando resumo final...', progress: 80 });
+  try {
+    await transition(job, { status: 'processing', stage: 'Sintetizando resumo final...', progress: 80 });
+  } catch {
+    res.status(503).json({ error: { message: 'Não foi possível salvar o estado do processamento.' } });
+    return;
+  }
   res.json(publicJob(job));
 
   queue = queue.then(() => continueJobPipeline(job.id)).catch(() => {});
