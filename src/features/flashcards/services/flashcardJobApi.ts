@@ -72,13 +72,12 @@ function mapDrafts(job: FlashcardJob): FlashcardDraft[] {
 }
 
 async function pollJob(id: string, signal?: AbortSignal, onProgress?: (job: FlashcardJob) => void) {
-  const headers = await buildAuthHeaders();
   let consecutiveFailures = 0;
   while (!signal?.aborted) {
     let response: Response;
     try {
       response = await fetch(`/api/flashcard/jobs/${id}`, {
-        headers,
+        headers: await buildAuthHeaders(),
         credentials: 'same-origin',
         signal,
       });

@@ -2,7 +2,7 @@ type TokenGetter = () => Promise<string | null>;
 
 let tokenGetter: TokenGetter | null = null;
 
-export function setAuthTokenGetter(getter) {
+export function setAuthTokenGetter(getter: TokenGetter | null) {
   tokenGetter = getter;
 }
 

@@ -79,7 +79,7 @@ export async function prepareQuizJob({
 
     while (!signal?.aborted) {
       const job = await responseJson(await fetch(`/api/quiz/jobs/${created.id}`, {
-        headers: authHeaders,
+        headers: await buildAuthHeaders(),
         credentials: 'same-origin',
         signal,
       })) as QuizJob;

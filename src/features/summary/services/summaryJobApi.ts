@@ -45,10 +45,9 @@ async function pollJob(
   onProgress: ProgressCallback | undefined,
   done: (job: Job) => boolean
 ) {
-  const authHeaders = await buildAuthHeaders();
   while (!signal?.aborted) {
     const job = await responseJson(await fetch(`/api/summary/jobs/${id}`, {
-      headers: authHeaders,
+      headers: await buildAuthHeaders(),
       credentials: 'same-origin',
       signal,
     })) as Job;

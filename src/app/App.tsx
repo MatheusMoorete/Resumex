@@ -109,7 +109,7 @@ export default function App() {
   const [session, setSession] = useState<AuthSession | null>(null);
   const [isLoaded, setIsLoaded] = useState(false);
   const isSignedIn = Boolean(session);
-  const getToken = useCallback(async () => session?.accessToken || null, [session]);
+  const getToken = useCallback(async () => (await authService.getSession())?.accessToken || null, []);
 
   useEffect(() => {
     authService.getSession().then((nextSession) => {
