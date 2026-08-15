@@ -38,6 +38,7 @@ COPY package.json package-lock.json ./
 RUN npm ci --omit=dev && npm cache clean --force
 
 COPY --from=build /app/dist ./dist
+COPY src ./src
 COPY server ./server
 COPY worker ./worker
 COPY server.js ./server.js
