@@ -21,7 +21,8 @@ export const GENERATION_ROLES = new Set([
   'vision',
   'quiz-extract',
   'quiz-generate',
-  'flashcards',
+  'flashcard-generate',
+  'flashcard-generate-complex',
 ]);
 
 export const AUDIT_ROLES = new Set(['quiz-audit']);
@@ -30,11 +31,11 @@ export const SIMPLE_AUDIT_ROLES = new Set(['quiz-audit-simple']);
 export const ALL_AUDIT_ROLES = new Set([...AUDIT_ROLES, ...CRITICAL_AUDIT_ROLES]);
 export const FAST_ROLES = new Set([
   'quiz-extract',
-  'flashcards',
+  'flashcard-generate',
   ...SIMPLE_AUDIT_ROLES,
 ]);
 export const ALLOWED_AI_ROLES = new Set([...GENERATION_ROLES, ...ALL_AUDIT_ROLES, ...SIMPLE_AUDIT_ROLES]);
-export const PUBLIC_AI_ROLES = new Set(['flashcards']);
+export const PUBLIC_AI_ROLES = new Set<string>();
 
 const MAX_INPUT_CHARS_BY_ROLE: Record<string, number> = {
   vision: 6_000_000,
@@ -43,7 +44,8 @@ const MAX_INPUT_CHARS_BY_ROLE: Record<string, number> = {
   'quiz-audit': 400_000,
   'quiz-audit-simple': 400_000,
   'quiz-audit-critical': 400_000,
-  flashcards: 180_000,
+  'flashcard-generate': 600_000,
+  'flashcard-generate-complex': 600_000,
 };
 
 function sanitizeMessage(message: any) {
@@ -140,6 +142,10 @@ export function resolveAiRoute(role: string): AiRoute | null {
     return getConfiguredAuditor(role);
   }
 
+  if (role === 'flashcard-generate-complex') {
+    return { providerName: 'deepseek', model: aiModels.deepseekPro };
+  }
+
   return {
     providerName: 'deepseek',
     model: FAST_ROLES.has(role) ? aiModels.deepseekFlash : aiModels.deepseekPro,
@@ -154,7 +160,8 @@ export function normalizeAiPayload(body: any, route: AiRoute, role: string): any
     'quiz-audit': 8192,
     'quiz-audit-simple': 6144,
     'quiz-audit-critical': 8192,
-    flashcards: 4096,
+    'flashcard-generate': 8192,
+    'flashcard-generate-complex': 8192,
   };
   const requestedMax = Number(body.max_tokens || body.max_completion_tokens || 0);
   const roleMax = maxTokensByRole[role] || 16000;
@@ -234,7 +241,7 @@ export function normalizeAiPayload(body: any, route: AiRoute, role: string): any
   } else {
     delete payload.max_completion_tokens;
     payload.max_tokens = maxTokens;
-    if (SIMPLE_AUDIT_ROLES.has(role)) {
+    if (SIMPLE_AUDIT_ROLES.has(role) || role.startsWith('flashcard-')) {
       payload.thinking = { type: 'disabled' };
       delete payload.reasoning_effort;
     } else {

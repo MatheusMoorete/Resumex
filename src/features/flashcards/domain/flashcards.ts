@@ -15,6 +15,10 @@ export type Flashcard = {
   deck_id: string;
   front: string;
   back: string;
+  source_type: 'summary' | 'external_text' | 'pdf' | null;
+  source_name: string | null;
+  source_page: number | null;
+  evidence_quote: string | null;
   due: string;
   stability: number;
   difficulty: number;
@@ -33,6 +37,10 @@ export type Flashcard = {
 export type FlashcardDraft = {
   front: string;
   back: string;
+  source_type?: 'summary' | 'external_text' | 'pdf' | null;
+  source_name?: string | null;
+  source_page?: number | null;
+  evidence_quote?: string | null;
 };
 
 export type ScheduledReview = {

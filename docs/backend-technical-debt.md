@@ -30,17 +30,19 @@ Prioridades:
 
 ### Caminho ativo
 
-1. `server/src/app.ts` monta `summaryJobs.ts` e `quizJobs.ts`.
-2. Os dois jobs guardam estado em `Map`, encadeiam uma fila `Promise` local e
+1. `server/src/app.ts` monta `summaryJobs.ts`, `quizJobs.ts` e `flashcardJobs.ts`.
+2. Os três jobs guardam estado em `Map`, encadeiam uma fila `Promise` local e
    chamam `worker/process_pdf.py` pelo protocolo legado.
 3. O resumo chama GLM/DeepSeek por um cliente proprio em `summaryJobs.ts`.
-4. O simulado reutiliza `src/features/quiz/services/quizApi.ts` e parte do
-   roteamento de `server/src/routes/aiProxy.ts`.
+4. Simulado e flashcards reutilizam `server/src/services/studyCorpus.ts` para
+   extração/visão e `server/src/services/serverAi.ts` para chamadas internas.
 5. O mesmo job de simulado aceita PDFs ou um resumo como corpus exclusivo; questões
    continuam exigindo trecho literal verificável e auditor independente.
 6. Resumos mantêm referências `(p. X)` no armazenamento; a limpeza ocorre somente
    nas exportações que pedem Markdown sem marcadores internos.
 7. Estado, resultados e limites operacionais do pipeline vivem no processo.
+8. Flashcards aceitam texto ou um PDF, pausam para incerteza visual e rejeitam
+   cartões sem evidência literal ou com números não sustentados.
 
 ### Caminho preparado ou parcialmente integrado
 
@@ -432,7 +434,7 @@ forma, justamente nas fronteiras mais sensiveis.
 
 **Linha de base executada**
 
-- `npm test`: 8 arquivos, 49 testes, todos passaram;
+- `npm test`: 8 arquivos, 51 testes, todos passaram;
 - `npm run typecheck`: passou;
 - `python -m unittest discover -s worker -p "test_*.py"`: 25 testes, todos passaram.
 
@@ -457,7 +459,7 @@ forma, justamente nas fronteiras mais sensiveis.
 **Evidencia**
 
 - `api/` contem adaptadores para health, auth, config, Notion e proxies, mas nao para
-  `/api/summary/jobs/*` ou `/api/quiz/jobs/*`.
+  `/api/summary/jobs/*`, `/api/quiz/jobs/*` ou `/api/flashcard/jobs/*`.
 - jobs e filas em memoria continuam executando depois da resposta HTTP, modelo
   incompativel com funcoes efemeras sem coordenacao externa.
 
@@ -496,11 +498,16 @@ em efeito.
 
 **Evidencia**
 
-- `summaryJobs.ts` e `quizJobs.ts` repetem lifecycle, upload, worker, fila, ownership
-  e cliente de IA, mas com diferencas de limpeza/cancelamento.
+- Os três jobs ainda repetem lifecycle, upload, fila e ownership, com diferenças de
+  limpeza/cancelamento. Worker/visão de simulado e flashcards agora convergem em
+  `studyCorpus.ts`; o cliente interno de IA converge em `serverAi.ts`.
 - o servidor importa `src/features/quiz/services/quizApi.ts`, que por sua vez importa
   servicos de auth e orquestracao do frontend e usa um setter global para injetar o
   caller server-side.
+
+**Status parcial:** a nova integração de flashcards reduziu duplicação de ingestão e
+IA sem criar uma factory de jobs; o lifecycle permanece explícito até os contratos
+P0 estabilizarem.
 
 **Risco**
 

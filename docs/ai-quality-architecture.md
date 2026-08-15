@@ -33,6 +33,7 @@ O score considera volume, páginas, arquivos, tabelas, valores/comparadores crí
 | SPEC do job de resumo | chamada interna do job | DeepSeek V4 Flash |
 | Resumo final | chamada interna do job | DeepSeek V4 Pro |
 | Extração e geração de questões | papéis internos `quiz-extract`, `quiz-generate` | DeepSeek V4 Flash/Pro |
+| Geração de flashcards | papéis internos `flashcard-generate`, `flashcard-generate-complex` | DeepSeek V4 Flash/Pro |
 | Auditoria de simulados | papel interno `quiz-audit` | Kimi K3 via OpenRouter, ou API direta |
 | Adjudicação difícil de simulados | papel interno `quiz-audit-critical` | GPT-5.6 Terra Pro via OpenRouter, ou API direta |
 
@@ -72,6 +73,18 @@ idempotente dos blocos do Document IR.
 9. Entregar apenas questões aprovadas com nota mínima. Questões reprovadas nunca completam o lote.
 
 Os papéis de geração e auditoria de simulados não são aceitos pelo proxy público. Quantidade, modo, referências, corpus, páginas visuais, chamadas simultâneas e frequência de jobs são normalizados no servidor.
+
+## Pipeline de flashcards
+
+1. Receber um resumo/texto ou um PDF em job autenticado.
+2. Para PDF, reutilizar `studyCorpus.ts`: PyMuPDF extrai páginas e GLM-4.5V recebe somente páginas visuais, até 30.
+3. Pausar para confirmação humana quando houver leitura visual incerta.
+4. Gerar 1,5 vez a quantidade desejada com DeepSeek Flash; usar Pro somente para corpus com visão, tabelas ou alta densidade numérica.
+5. Exigir pergunta, resposta, arquivo, página e `evidenceQuote` literal em JSON validado por Zod.
+6. Localizar a evidência na página declarada e rejeitar resposta cujos números, unidades ou comparadores não apareçam nela.
+7. Remover duplicatas exatas, limitar ao pedido e entregar rascunhos editáveis; somente a confirmação do usuário persiste os cartões.
+
+Resumo e texto externo usam uma página lógica apenas para validação, mas não persistem número de página. O proxy público antigo de flashcards foi removido; modelos e segredos permanecem no servidor.
 
 ## Configuração
 

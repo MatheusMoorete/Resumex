@@ -101,7 +101,17 @@ export async function listTodayReviews(): Promise<Array<{ state: number }>> {
 
 export async function createCards(deckId: string, drafts: FlashcardDraft[]): Promise<Flashcard[]> {
   const cards = drafts
-    .map((draft) => ({ deck_id: deckId, front: draft.front.trim(), back: draft.back.trim() }))
+    .map((draft) => ({
+      deck_id: deckId,
+      front: draft.front.trim(),
+      back: draft.back.trim(),
+      ...(draft.source_type ? {
+        source_type: draft.source_type,
+        source_name: draft.source_name?.trim() || null,
+        source_page: draft.source_page || null,
+        evidence_quote: draft.evidence_quote?.trim() || null,
+      } : {}),
+    }))
     .filter((card) => card.front && card.back);
   if (!cards.length) return [];
 

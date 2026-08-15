@@ -15,6 +15,7 @@ import { State } from '../services/flashcardScheduler';
 import CardEditor from './CardEditor';
 import ReviewSession from './ReviewSession';
 import FicharioAction from '../../../shared/components/FicharioAction';
+import FlashcardGenerator from './FlashcardGenerator';
 
 type Props = {
   initialDrafts?: FlashcardDraft[];
@@ -30,6 +31,7 @@ export default function FlashcardHome({ initialDrafts = [] }: Props) {
   const [newDeckName, setNewDeckName] = useState('');
   const [showEditor, setShowEditor] = useState(false);
   const [editingCard, setEditingCard] = useState<Flashcard | null>(null);
+  const [editingDraftIndex, setEditingDraftIndex] = useState<number | null>(null);
   const [isReviewing, setIsReviewing] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
@@ -137,6 +139,14 @@ export default function FlashcardHome({ initialDrafts = [] }: Props) {
     }
   };
 
+  const handleSaveDraft = async (draft: FlashcardDraft) => {
+    if (editingDraftIndex === null) return;
+    setPendingDrafts((current) => current.map((item, index) => (
+      index === editingDraftIndex ? { ...item, front: draft.front, back: draft.back } : item
+    )));
+    setEditingDraftIndex(null);
+  };
+
   const handleDeleteCard = async (card: Flashcard) => {
     if (!window.confirm('Excluir este cartão?')) return;
     try {
@@ -177,6 +187,8 @@ export default function FlashcardHome({ initialDrafts = [] }: Props) {
       </header>
 
       {error && <div className="upload-error" role="alert">{error}</div>}
+
+      <FlashcardGenerator onDrafts={setPendingDrafts} />
 
       {isCreatingDeck && (
         <form className="flashcard-new-deck-form" onSubmit={handleCreateDeck}>
@@ -230,10 +242,26 @@ export default function FlashcardHome({ initialDrafts = [] }: Props) {
               </div>
 
               {pendingDrafts.length > 0 && (
-                <div className="flashcard-import-banner">
-                  <div><strong>{pendingDrafts.length} cartões prontos</strong><span>Gerados a partir do seu resumo.</span></div>
-                  <button className="btn btn-primary" onClick={handleImportDrafts}>Adicionar a {selectedDeck.name}</button>
-                </div>
+                <>
+                  <div className="flashcard-import-banner">
+                    <div><strong>{pendingDrafts.length} cartões prontos</strong><span>Revise e adicione ao baralho quando estiver satisfeito.</span></div>
+                    <button className="btn btn-primary" onClick={handleImportDrafts}>Adicionar a {selectedDeck.name}</button>
+                  </div>
+                  {editingDraftIndex !== null && (
+                    <CardEditor card={pendingDrafts[editingDraftIndex]} onSave={handleSaveDraft} onCancel={() => setEditingDraftIndex(null)} />
+                  )}
+                  <div className="flashcard-draft-list">
+                    {pendingDrafts.map((draft, index) => (
+                      <article key={`${draft.front}-${index}`}>
+                        <div><strong>{draft.front}</strong><p>{draft.back}</p>{draft.source_name && <small>{draft.source_name}{draft.source_page ? ` · p. ${draft.source_page}` : ''}</small>}{draft.evidence_quote && <details><summary>Ver evidência</summary><blockquote>{draft.evidence_quote}</blockquote></details>}</div>
+                        <div className="flashcard-row-actions">
+                          <button type="button" onClick={() => setEditingDraftIndex(index)} aria-label="Editar rascunho"><Pencil size={16} /></button>
+                          <button type="button" onClick={() => setPendingDrafts((current) => current.filter((_, itemIndex) => itemIndex !== index))} aria-label="Excluir rascunho"><Trash2 size={16} /></button>
+                        </div>
+                      </article>
+                    ))}
+                  </div>
+                </>
               )}
 
               <div className="flashcard-count-grid">
@@ -254,7 +282,7 @@ export default function FlashcardHome({ initialDrafts = [] }: Props) {
                 {cards.map((card) => (
                   <article className="flashcard-list-item" key={card.id}>
                     <div><span>Frente</span><strong>{card.front}</strong></div>
-                    <div><span>Verso</span><p>{card.back}</p></div>
+                    <div><span>Verso</span><p>{card.back}</p>{card.source_name && <small>{card.source_name}{card.source_page ? ` · p. ${card.source_page}` : ''}</small>}{card.evidence_quote && <details><summary>Ver evidência</summary><blockquote>{card.evidence_quote}</blockquote></details>}</div>
                     <div className="flashcard-row-actions">
                       <button onClick={() => { setEditingCard(card); setShowEditor(true); }} aria-label="Editar cartão"><Pencil size={16} /></button>
                       <button onClick={() => handleDeleteCard(card)} aria-label="Excluir cartão"><Trash2 size={16} /></button>

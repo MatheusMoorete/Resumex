@@ -10,6 +10,9 @@ import {
 import { getClientId } from '../src/middlewares/rateLimit.js';
 import { normalizePreferences, preferenceInstructions } from '../summaryJobs.js';
 import { normalizeQuizOptions, normalizeQuizSummarySource } from '../quizJobs.js';
+import { normalizeFlashcardCount } from '../flashcardJobs.js';
+import { validateFlashcardCandidates } from '../src/services/flashcardGeneration.js';
+import { applyVisualAnswers, getVisualQuestions } from '../src/services/studyCorpus.js';
 import { verifyQuestionEvidence } from '../../src/features/quiz/services/quizApi.js';
 
 describe('Server Modular Health & Utilities (TypeScript)', () => {
@@ -56,6 +59,9 @@ describe('Server Modular Health & Utilities (TypeScript)', () => {
   it('should keep quiz generation roles private to server jobs', () => {
     expect(PUBLIC_AI_ROLES.has('quiz-generate')).toBe(false);
     expect(PUBLIC_AI_ROLES.has('quiz-audit')).toBe(false);
+    expect(PUBLIC_AI_ROLES.has('flashcard-generate')).toBe(false);
+    expect(resolveAiRoute('flashcard-generate')?.model).toContain('flash');
+    expect(resolveAiRoute('flashcard-generate-complex')?.model).toContain('pro');
   });
 
   it('should cap output and discard arbitrary provider options', () => {
@@ -65,17 +71,17 @@ describe('Server Modular Health & Utilities (TypeScript)', () => {
       temperature: 9,
       n: 100,
       tools: [{ type: 'function' }],
-    }, { providerName: 'deepseek', model: 'test-model' }, 'flashcards');
+    }, { providerName: 'deepseek', model: 'test-model' }, 'flashcard-generate');
 
-    expect(payload.max_tokens).toBe(4096);
+    expect(payload.max_tokens).toBe(8192);
     expect(payload.temperature).toBe(0.5);
     expect(payload.n).toBeUndefined();
     expect(payload.tools).toBeUndefined();
   });
 
   it('should reject oversized AI input', () => {
-    expect(() => sanitizeAiMessages('flashcards', [
-      { role: 'user', content: 'A'.repeat(180_001) },
+    expect(() => sanitizeAiMessages('flashcard-generate', [
+      { role: 'user', content: 'A'.repeat(600_001) },
     ])).toThrow(/character limit/);
   });
 
@@ -129,6 +135,61 @@ describe('Server Modular Health & Utilities (TypeScript)', () => {
     });
     expect(normalizeQuizSummarySource({ name: '   ', text: 'Conteúdo válido.' })?.name).toBe('Resumo atual.md');
     expect(normalizeQuizSummarySource({ text: 'A'.repeat(180_001) })).toBeNull();
+  });
+
+  it('should validate grounded flashcards and preserve critical numbers', () => {
+    const files = [{
+      name: 'venosas.pdf',
+      size: 100,
+      numPages: 1,
+      pageTexts: ['A compressão recomendada no material é de 30 mmHg para este caso clínico.'],
+      text: 'A compressão recomendada no material é de 30 mmHg para este caso clínico.',
+      readMode: 'text' as const,
+      requiresVision: false as const,
+    }];
+    const raw = { cards: [
+      {
+        front: 'Qual é a compressão recomendada?',
+        back: '30 mmHg.',
+        sourceName: 'venosas.pdf',
+        sourcePage: 1,
+        evidenceQuote: 'A compressão recomendada no material é de 30 mmHg para este caso clínico.',
+      },
+      {
+        front: 'Qual é a compressão incorreta?',
+        back: '40 mmHg.',
+        sourceName: 'venosas.pdf',
+        sourcePage: 1,
+        evidenceQuote: 'A compressão recomendada no material é de 30 mmHg para este caso clínico.',
+      },
+    ] };
+
+    const cards = validateFlashcardCandidates(raw, files, 'pdf', 20);
+    expect(cards).toHaveLength(1);
+    expect(cards[0]).toMatchObject({ sourceType: 'pdf', sourcePage: 1, back: '30 mmHg.' });
+    expect(normalizeFlashcardCount(999)).toBe(20);
+  });
+
+  it('should require and apply human confirmation for uncertain visual text', () => {
+    const pages = [{
+      page: 3,
+      sourceName: 'anotacoes.pdf',
+      visual: {
+        confidence: 0.4,
+        handwriting: 'dose possivelmente 20 mg',
+        visualContent: '',
+        uncertainties: [],
+      },
+    }];
+
+    const questions = getVisualQuestions(pages);
+    expect(questions).toHaveLength(1);
+    expect(questions[0]).toMatchObject({ id: 'p3-q1', page: 3 });
+
+    applyVisualAnswers(pages, [{ id: 'p3-q1', action: 'correct', value: 'dose confirmada 10 mg' }]);
+    expect(pages[0].visual.handwriting).toBe('dose confirmada 10 mg');
+    expect(pages[0].visual.uncertainties).toEqual([]);
+    expect(pages[0].visual.confidence).toBe(0.9);
   });
 
   it('should verify quiz evidence on the declared file and page', () => {

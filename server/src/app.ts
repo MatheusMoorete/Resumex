@@ -11,6 +11,7 @@ import notionRouter from './routes/notion.js';
 import adminMetricsRouter from './routes/adminMetrics.js';
 import summaryJobsRouter from '../summaryJobs.js';
 import quizJobsRouter from '../quizJobs.js';
+import flashcardJobsRouter from '../flashcardJobs.js';
 
 const app: Express = express();
 
@@ -35,6 +36,12 @@ app.use(
   requireAuth,
   rateLimit({ windowMs: 60 * 60 * 1000, max: 500, name: 'quiz-jobs' }),
   quizJobsRouter
+);
+app.use(
+  '/api/flashcard/jobs',
+  requireAuth,
+  rateLimit({ windowMs: 60 * 60 * 1000, max: 500, name: 'flashcard-jobs' }),
+  flashcardJobsRouter
 );
 app.use('/api/notion', notionRouter);
 app.use('/api', aiProxyRouter);

@@ -23,7 +23,7 @@ import QuizView from '../features/quiz/components/QuizView';
 import QuizProcessingTimeline from '../features/quiz/components/QuizProcessingTimeline';
 import { cancelQuizJob, prepareQuizJob } from '../features/quiz/services/quizJobApi';
 import { revokePdfCorpusUrls } from '../features/pdf/services/pdfCorpus';
-import { generateFlashcardsFromSummary } from '../features/flashcards/services/flashcardGenerator';
+import { prepareFlashcardJob } from '../features/flashcards/services/flashcardJobApi';
 import { setAuthTokenGetter } from '../features/auth/services/authClient';
 import { createSummary } from '../features/summary/services/summaryApi';
 import { createQuiz } from '../features/quiz/services/quizPersistenceApi';
@@ -206,7 +206,6 @@ export default function App() {
 
   // Abort controller
   const abortControllerRef = useRef(null);
-  const hasDeepseekAccess = Boolean(deepseekKey || serverConfig.deepseekConfigured);
   const hasZhipuAccess = Boolean(zhipuKey || serverConfig.zhipuConfigured);
   const hasIndependentAuditor = Boolean(serverConfig.auditorConfigured);
   const highRiskItems = visualQuestions;
@@ -378,22 +377,22 @@ export default function App() {
       return;
     }
 
-    if (!hasDeepseekAccess) {
-      setShowApiKeyModal(true);
-      throw new Error('Configure o DeepSeek para gerar flashcards automaticamente.');
+    if (!serverConfig.deepseekConfigured) {
+      throw new Error('Configure DEEPSEEK_API_KEY no servidor para gerar flashcards.');
     }
 
     const controller = new AbortController();
     abortControllerRef.current = controller;
-    const drafts = await generateFlashcardsFromSummary({
-      apiKey: deepseekKey,
-      summary,
+    const { drafts } = await prepareFlashcardJob({
+      textSource: { name: 'Resumo atual.md', text: summary },
+      sourceType: 'summary',
+      count: 20,
       signal: controller.signal,
     });
     if (!drafts.length) throw new Error('O resumo não gerou cartões válidos.');
     setFlashcardDrafts(drafts);
     openHomeMode('flashcards');
-  }, [deepseekKey, hasDeepseekAccess, isLocalTestFlow, openHomeMode, summary]);
+  }, [isLocalTestFlow, openHomeMode, serverConfig.deepseekConfigured, summary]);
 
   const handleGenerateQuiz = useCallback(async (files, options: any = {}) => {
     if (!serverConfig.deepseekConfigured) {

@@ -7,7 +7,7 @@ Este arquivo vale para todo o repositório. Um `AGENTS.md` mais próximo do arqu
 - Produto: aplicação médica que transforma até 5 PDFs em resumo rastreável, simulado e flashcards.
 - Runtime: Node.js 22+, React 19, Vite, TypeScript no frontend e no backend Express, e Python 3 com PyMuPDF no worker.
 - Entrada web: `src/main.tsx`. Composição do app autenticado: `src/app/App.tsx`.
-- API: `server/index.ts`. Jobs de resumo: `server/summaryJobs.ts`. Extração Python: `worker/process_pdf.py`.
+- API: `server/index.ts`. Jobs: `server/summaryJobs.ts`, `server/quizJobs.ts` e `server/flashcardJobs.ts`. Extração Python: `worker/process_pdf.py`.
 - Antes de alterar o backend, leia `docs/backend-technical-debt.md`. Ele separa o fluxo ativo da camada V2 ainda não integrada.
 - A ponte V2 é opt-in e cobre somente resumos com um PDF: original/lifecycle persistem, o worker gera um Document IR validado e o provider de resumo persiste o resultado. Multi-PDF, providers de planejamento/visão, páginas/blocos/fontes relacionais e recuperação após restart continuam no caminho legado/incompleto.
 - Leia `docs/ai-quality-architecture.md` antes de alterar prompts, auditoria, modelos ou critérios médicos.
@@ -18,7 +18,7 @@ Este arquivo vale para todo o repositório. Um `AGENTS.md` mais próximo do arqu
 - `src/app`: rotas operacionais, estado do fluxo e CSS global do tema Fichário Vivo.
 - `src/features`: código por domínio; prefira trabalhar no domínio existente.
 - `src/shared`: componentes e utilitários realmente compartilhados.
-- `server`: autenticação, autorização, rate limit, proxy de IA, Notion e jobs.
+- `server`: autenticação, autorização, rate limit, proxy de IA, Notion e jobs de resumo, simulado e flashcards.
 - `worker`: extração de PDF e detecção de páginas que exigem visão.
 - `supabase/migrations`: esquema, RLS e RPCs persistentes.
 - `api`: adaptadores mínimos do deploy serverless; a implementação fica em `server`.

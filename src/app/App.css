@@ -5681,6 +5681,194 @@ select.input option {
   }
 }
 /* Flashcards */
+.flashcard-generator {
+  display: grid;
+  gap: 18px;
+  padding: 22px;
+  margin-bottom: 22px;
+  border: 1px solid var(--border-accent);
+  border-radius: var(--radius-xl);
+  background: var(--bg-glass);
+}
+
+.flashcard-generator-heading,
+.flashcard-generator-actions,
+.flashcard-selected-file,
+.flashcard-job-progress,
+.flashcard-source-tabs,
+.flashcard-review-options {
+  display: flex;
+  align-items: center;
+}
+
+.flashcard-generator-heading {
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.flashcard-generator-heading > div,
+.flashcard-selected-file > div,
+.flashcard-visual-review > div:first-child {
+  display: grid;
+  gap: 4px;
+}
+
+.flashcard-generator-heading span,
+.flashcard-source-text,
+.flashcard-generator-actions label {
+  color: var(--text-muted);
+  font-size: var(--font-size-xs);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.flashcard-generator-heading h3 {
+  font: 600 1.45rem/1.15 var(--font-display);
+}
+
+.flashcard-generator-heading p,
+.flashcard-selected-file span,
+.flashcard-visual-review span,
+.flashcard-list-item small {
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+}
+
+.flashcard-source-tabs {
+  gap: 8px;
+}
+
+.flashcard-source-tabs button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 9px 12px;
+  border: 1px solid var(--border-glass);
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.flashcard-source-tabs button.is-active {
+  border-color: var(--border-accent);
+  background: rgba(143, 184, 168, 0.08);
+  color: var(--text-accent);
+}
+
+.flashcard-source-text {
+  display: grid;
+  gap: 8px;
+}
+
+.flashcard-source-text textarea,
+.flashcard-visual-review textarea {
+  width: 100%;
+  resize: vertical;
+  padding: 13px;
+  border: 1px solid var(--border-glass);
+  border-radius: var(--radius-md);
+  outline: 0;
+  background: var(--bg-input);
+  color: var(--text-primary);
+  font: 400 var(--font-size-sm)/1.55 var(--font-family);
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+.flashcard-source-text > span {
+  justify-self: end;
+  color: var(--text-muted);
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+.flashcard-selected-file {
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--border-glass);
+  border-radius: var(--radius-lg);
+}
+
+.flashcard-selected-file > div { flex: 1; }
+.flashcard-selected-file button {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.flashcard-generator-actions {
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.flashcard-generator-actions label {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-right: auto;
+}
+
+.flashcard-generator-actions select {
+  padding: 10px;
+  border: 1px solid var(--border-glass);
+  border-radius: var(--radius-md);
+  background: var(--bg-input);
+  color: var(--text-primary);
+}
+
+.flashcard-job-progress {
+  gap: 14px;
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+}
+
+.flashcard-job-progress span { flex: 1; }
+.flashcard-job-progress progress { width: min(260px, 45%); }
+
+.flashcard-visual-review {
+  display: grid;
+  gap: 14px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border-glass);
+}
+
+.flashcard-visual-review fieldset {
+  display: grid;
+  gap: 9px;
+  padding: 14px;
+  border: 1px solid var(--border-glass);
+  border-radius: var(--radius-lg);
+}
+
+.flashcard-visual-review legend {
+  padding: 0 6px;
+  color: var(--text-accent);
+  font-size: var(--font-size-sm);
+  font-weight: 700;
+}
+
+.flashcard-review-options {
+  flex-wrap: wrap;
+  gap: 14px;
+}
+
+.flashcard-review-options label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+}
+
 .flashcard-workspace,
 .flashcard-review-shell {
   width: min(1180px, calc(100% - 40px));
@@ -5907,6 +6095,54 @@ select.input option {
   font-size: var(--font-size-sm);
 }
 
+.flashcard-draft-list {
+  display: grid;
+  gap: 8px;
+  margin: 10px 0 22px;
+}
+
+.flashcard-draft-list article {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 13px 15px;
+  border: 1px solid var(--border-glass);
+  border-radius: var(--radius-lg);
+  background: var(--bg-glass);
+}
+
+.flashcard-draft-list article > div:first-child {
+  display: grid;
+  gap: 5px;
+}
+
+.flashcard-draft-list p,
+.flashcard-draft-list small {
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+}
+
+.flashcard-draft-list details,
+.flashcard-list-item details {
+  margin-top: 3px;
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+}
+
+.flashcard-draft-list summary,
+.flashcard-list-item summary {
+  cursor: pointer;
+  color: var(--text-accent);
+}
+
+.flashcard-draft-list blockquote,
+.flashcard-list-item blockquote {
+  margin: 7px 0 0;
+  padding-left: 10px;
+  border-left: 2px solid var(--border-accent);
+}
+
 .flashcard-count-grid {
   display: grid;
   grid-template-columns: repeat(3, 1fr) 1.35fr;
@@ -6050,6 +6286,11 @@ select.input option {
 
 .flashcard-list-item p {
   color: var(--text-secondary);
+}
+
+.flashcard-list-item small {
+  display: block;
+  margin-top: 3px;
 }
 
 .flashcard-row-actions {
@@ -6235,6 +6476,15 @@ select.input option {
     justify-self: start;
   }
 
+  .flashcard-generator-actions,
+  .flashcard-job-progress {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .flashcard-generator-actions label { margin-right: 0; }
+  .flashcard-job-progress progress { width: 100%; }
+
   .flashcard-layout {
     grid-template-columns: 1fr;
   }
@@ -6295,6 +6545,9 @@ select.input option {
 }
 
 @media (max-width: 560px) {
+  .flashcard-generator { padding: 16px; }
+  .flashcard-generator-heading { align-items: flex-start; }
+  .flashcard-source-tabs button { flex: 1; justify-content: center; }
   .flashcard-deck-titlebar,
   .flashcard-import-banner {
     align-items: flex-start;
@@ -6484,7 +6737,11 @@ select.input option {
 }
 .home-fichario .flashcard-new-deck-form,
 .home-fichario .flashcard-editor,
-.home-fichario .flashcard-import-banner {
+.home-fichario .flashcard-import-banner,
+.home-fichario .flashcard-generator,
+.home-fichario .flashcard-draft-list article,
+.home-fichario .flashcard-visual-review fieldset,
+.home-fichario .flashcard-selected-file {
   border: 2px solid var(--fichario-ink);
   border-radius: 3px;
   color: var(--fichario-ink);
@@ -6494,9 +6751,15 @@ select.input option {
 .home-fichario .flashcard-new-deck-form label,
 .home-fichario .flashcard-editor label,
 .home-fichario .flashcard-editor-heading span,
-.home-fichario .flashcard-list-item > div > span { color: #65726b; }
+.home-fichario .flashcard-list-item > div > span,
+.home-fichario .flashcard-generator-heading span,
+.home-fichario .flashcard-source-text,
+.home-fichario .flashcard-generator-actions label { color: #65726b; }
 .home-fichario .flashcard-new-deck-form input,
-.home-fichario .flashcard-editor textarea {
+.home-fichario .flashcard-editor textarea,
+.home-fichario .flashcard-source-text textarea,
+.home-fichario .flashcard-visual-review textarea,
+.home-fichario .flashcard-generator-actions select {
   border-color: var(--fichario-ink);
   border-radius: 2px;
   color: var(--fichario-ink);
@@ -6506,7 +6769,16 @@ select.input option {
 .home-fichario .flashcard-list-item { border-color: rgba(32, 50, 41, .24); }
 .home-fichario .flashcard-list-item p,
 .home-fichario .flashcard-empty-state,
-.home-fichario .flashcard-empty-copy { color: #65726b; }
+.home-fichario .flashcard-empty-copy,
+.home-fichario .flashcard-generator-heading p,
+.home-fichario .flashcard-job-progress,
+.home-fichario .flashcard-draft-list p,
+.home-fichario .flashcard-draft-list small,
+.home-fichario .flashcard-visual-review span { color: #65726b; }
+.home-fichario .flashcard-generator-heading h3,
+.home-fichario .flashcard-visual-review strong { color: var(--fichario-ink); }
+.home-fichario .flashcard-source-tabs button { color: var(--fichario-ink); border-color: var(--fichario-ink); background: var(--fichario-paper); }
+.home-fichario .flashcard-source-tabs button.is-active { background: var(--fichario-yellow); }
 .home-fichario .flashcard-icon-button,
 .home-fichario .flashcard-row-actions button { border-color: var(--fichario-ink); color: var(--fichario-ink); background: var(--fichario-paper); }
 

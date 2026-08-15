@@ -1,26 +1,16 @@
 import express, { Request, Response, Router } from 'express';
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
 import { randomUUID } from 'node:crypto';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { rateLimit } from './src/middlewares/rateLimit.js';
-import { providers, upstreamTimeoutMs } from './src/config/env.js';
-import {
-  ALL_AUDIT_ROLES,
-  getConfiguredAuditors,
-  logAiUsage,
-  normalizeAiPayload,
-  resolveAiRoute,
-} from './src/routes/aiProxy.js';
-import { mapTwoAtATime, pageContext, readVisualPage } from './summaryJobs.js';
+import { callServerAi } from './src/services/serverAi.js';
+import { buildPdfCorpusFiles, buildTextCorpusFile, extractPdfPages } from './src/services/studyCorpus.js';
 import {
   buildQuizFromCorpus,
   setQuizServerAiCaller,
 } from '../src/features/quiz/services/quizApi.js';
 
-const runFile = promisify(execFile);
 const router: Router = express.Router();
 const jobs = new Map<string, QuizJob>();
 let queue = Promise.resolve();
@@ -35,14 +25,11 @@ const MAX_SUMMARY_CHARS = 180_000;
 const MAX_REFERENCE_QUESTIONS = 45;
 const MAX_TEXT_AI_CALLS = 30;
 const JOB_TTL_MS = 2 * 60 * 60 * 1000;
-const PYTHON_BIN = process.env.PYTHON_BIN || (process.platform === 'win32' ? 'py' : 'python3');
-const WORKER_PATH = path.resolve('worker/process_pdf.py');
 const startJobRateLimit = rateLimit({
   windowMs: 60 * 60 * 1000,
   max: 3,
   name: 'quiz-job-start',
 });
-const aiCallsBySignal = new WeakMap<AbortSignal, number>();
 const createJobRateLimit = rateLimit({
   windowMs: 60 * 60 * 1000,
   max: 3,
@@ -154,133 +141,7 @@ function ownedJob(req: Request, res: Response): QuizJob | null {
   return job;
 }
 
-function responseContent(payload: any): string {
-  const content = payload?.choices?.[0]?.message?.content;
-  if (typeof content === 'string') return content.trim();
-  if (Array.isArray(content)) return content.map((item) => item?.text || '').join('').trim();
-  return '';
-}
-
-async function callQuizAi({
-  system,
-  user,
-  signal,
-  role,
-  maxTokens,
-  temperature,
-}: any): Promise<string> {
-  if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
-  if (signal) {
-    const calls = (aiCallsBySignal.get(signal) || 0) + 1;
-    if (calls > MAX_TEXT_AI_CALLS) {
-      throw new Error(`O simulado excedeu o limite interno de ${MAX_TEXT_AI_CALLS} chamadas de IA.`);
-    }
-    aiCallsBySignal.set(signal, calls);
-  }
-  const primaryRoute = resolveAiRoute(role);
-  if (!primaryRoute) throw new Error(`Papel de IA inválido: ${role}.`);
-  const routeCandidates = ALL_AUDIT_ROLES.has(role) ? getConfiguredAuditors(role) : [primaryRoute];
-  if (!routeCandidates.length) throw new Error('A auditoria independente do simulado não está configurada.');
-
-  const budgetByRole: Record<string, number> = {
-    'quiz-extract': 7000,
-    'quiz-generate': 7000,
-    'quiz-audit': 5000,
-    'quiz-audit-simple': 5000,
-    'quiz-audit-critical': 6000,
-  };
-  let lastError: Error | null = null;
-
-  for (const route of routeCandidates) {
-    const provider = providers[route.providerName];
-    if (!provider?.envKey) continue;
-    const payload = normalizeAiPayload({
-      messages: [
-        { role: 'system', content: system },
-        { role: 'user', content: user },
-      ],
-      max_tokens: Math.min(Number(maxTokens) || 8192, budgetByRole[role] || 6000),
-      response_format: { type: 'json_object' },
-      temperature,
-    }, route, role);
-    const startedAt = Date.now();
-    const timeoutController = new AbortController();
-    const timeout = setTimeout(() => timeoutController.abort(), upstreamTimeoutMs);
-    const abort = () => timeoutController.abort();
-    signal?.addEventListener('abort', abort, { once: true });
-
-    try {
-      const headers: Record<string, string> = {
-        Authorization: `Bearer ${provider.envKey}`,
-        'Content-Type': 'application/json',
-      };
-      if (route.providerName === 'openrouter') {
-        headers['HTTP-Referer'] = process.env.OPENROUTER_SITE_URL || 'https://resumex.app';
-        headers['X-OpenRouter-Title'] = process.env.OPENROUTER_APP_TITLE || 'ResumeX';
-      }
-      const response = await fetch(`${provider.baseUrl}/chat/completions`, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify(payload),
-        signal: timeoutController.signal,
-      });
-      const result = await response.json().catch(() => null);
-      if (!response.ok) {
-        throw new Error(result?.error?.message || `${route.providerName} respondeu ${response.status}.`);
-      }
-      const content = responseContent(result);
-      if (!content) throw new Error(`${route.providerName} retornou conteúdo vazio.`);
-      if (result?.choices?.[0]?.finish_reason === 'length') {
-        throw new Error(`${route.providerName} atingiu o limite de saída.`);
-      }
-      logAiUsage({
-        role,
-        providerName: route.providerName,
-        model: route.model,
-        usage: result?.usage,
-        finishReason: result?.choices?.[0]?.finish_reason || null,
-        durationMs: Date.now() - startedAt,
-      });
-      return content;
-    } catch (error) {
-      if (signal?.aborted) throw error;
-      lastError = error instanceof Error ? error : new Error('Falha no provedor de IA.');
-    } finally {
-      clearTimeout(timeout);
-      signal?.removeEventListener('abort', abort);
-    }
-  }
-  throw lastError || new Error('Nenhum provedor de IA está configurado para o simulado.');
-}
-
-setQuizServerAiCaller(callQuizAi);
-
-function buildCorpusFiles(job: QuizJob, pages: any[]) {
-  return job.files.map((file, sourceIndex) => {
-    const sourcePages = pages
-      .filter((page) => page.sourceIndex === sourceIndex)
-      .map((page) => ({
-        ...page,
-        sourceName: file.name,
-        visual: page.visual
-          && page.visual.confidence >= 0.85
-          && !page.visual.uncertainties?.length
-          ? page.visual
-          : null,
-      }));
-    return {
-      name: file.name,
-      size: file.size,
-      numPages: sourcePages.length,
-      pageTexts: sourcePages.map((page) => pageContext(page)),
-      text: sourcePages
-        .map((page) => `--- Página ${page.sourcePage} ---\n${pageContext(page)}`)
-        .join('\n\n'),
-      readMode: 'text',
-      requiresVision: false,
-    };
-  });
-}
+setQuizServerAiCaller((params) => callServerAi({ ...params, maxCalls: MAX_TEXT_AI_CALLS }));
 
 const STAGE_PROGRESS: Record<string, number> = {
   classify: 45,
@@ -303,61 +164,20 @@ async function runJob(jobId: string) {
         message: 'Preparando o resumo como fonte do simulado.',
         progress: 30,
       });
-      files = [{
-        name: job.summarySource.name,
-        size: Buffer.byteLength(job.summarySource.text, 'utf8'),
-        numPages: 1,
-        pageTexts: [job.summarySource.text],
-        text: `--- Página 1 ---\n${job.summarySource.text}`,
-        readMode: 'text',
-        requiresVision: false,
-      }];
+      files = [buildTextCorpusFile(job.summarySource)];
     } else {
-    update(job, {
-      status: 'processing',
-      stage: 'files',
-      message: 'Extraindo texto e detectando páginas visuais.',
-      progress: 15,
-    });
-    const { stdout } = await runFile(PYTHON_BIN, [
-      WORKER_PATH,
-      ...job.files.map((file) => file.path),
-      '--output-dir',
-      job.dir,
-      '--vision-mode',
-      'auto',
-      '--max-vision-pages',
-      String(MAX_VISION_PAGES),
-    ], {
-      maxBuffer: 10 * 1024 * 1024,
-      env: { ...process.env, PYTHONIOENCODING: 'utf-8' },
-      signal: job.controller.signal,
-      timeout: 10 * 60 * 1000,
-    });
-    const pdfData = JSON.parse(stdout);
-    const pages = Array.isArray(pdfData.pages) ? pdfData.pages : [];
-    const visionPages = pages.filter((page: any) => page.needsVision);
-    if (visionPages.length > MAX_VISION_PAGES) {
-      throw new Error(
-        `O material exige leitura visual de ${visionPages.length} páginas; o limite por simulado é ${MAX_VISION_PAGES}. Divida os PDFs.`
-      );
-    }
-    if (visionPages.length) {
-      update(job, {
-        stage: 'vision',
-        message: `Lendo automaticamente ${visionPages.length} páginas visuais.`,
-        progress: 30,
+      update(job, { status: 'processing' });
+      const pages = await extractPdfPages({
+        files: job.files,
+        outputDir: job.dir,
+        signal: job.controller.signal,
+        maxVisionPages: MAX_VISION_PAGES,
+        onProgress: (stage, message, progress) => update(job, { stage, message, progress }),
       });
-      const results = await mapTwoAtATime(
-        visionPages,
-        (page) => readVisualPage(page, job.controller.signal)
-      );
-      visionPages.forEach((page: any, index: number) => {
-        page.visual = results[index].result;
+      pages.forEach((page: any) => {
+        if (page.visual && (page.visual.confidence < 0.85 || page.visual.uncertainties?.length)) page.visual = null;
       });
-    }
-
-      files = buildCorpusFiles(job, pages);
+      files = buildPdfCorpusFiles(job.files, pages);
     }
     const corpusChars = files.reduce((total, file) => total + file.text.length, 0);
     if (corpusChars > MAX_CORPUS_CHARS) {

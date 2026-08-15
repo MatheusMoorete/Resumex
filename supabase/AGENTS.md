@@ -4,7 +4,7 @@ Migrations são cumulativas e devem funcionar em banco existente. Não reescreva
 
 Leia `../docs/backend-technical-debt.md` antes de aplicar ou integrar `202607240001_pipeline_persistence.sql`. BACK-004 e BACK-005 foram corrigidos no working tree, mas a migration ainda exige testes de RLS e integridade com dois usuarios antes de producao.
 
-O historico remoto foi reconciliado em 09/08/2026: `202607190001`, `202607220001` e `202607230001` estao aplicadas e validadas por `../tests/backend_security.sql`. O dry-run remoto mostra somente `202607240001_pipeline_persistence.sql` pendente; nao execute `db push` ate a camada V2 estar integrada e BACK-004/BACK-005 terem teste final com dois usuarios.
+O historico remoto foi reconciliado em 14/08/2026: `202607190001`, `202607220001`, `202607230001` e `202607230002` estao aplicadas. A seguranca foi validada por `../tests/backend_security.sql`, e as colunas de fonte dos flashcards foram aplicadas isoladamente pelo SQL Editor. O dry-run remoto mostra somente `202607240001_pipeline_persistence.sql` pendente; nao execute `db push` ate a camada V2 estar integrada e BACK-004/BACK-005 terem teste final com dois usuarios.
 
 A ponte opt-in do servidor usa `documents`, `processing_jobs`, `summary_versions` e o bucket `document-originals` somente para jobs de resumo com um PDF. O Document IR e validado no runtime, mas so seus metadados entram no checkpoint; paginas, blocos e `summary_sources` nao persistem. Isso nao autoriza aplicar a migration: recuperacao, providers restantes e o caso multi-PDF ainda nao estao integrados.
 

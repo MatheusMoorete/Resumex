@@ -45,18 +45,18 @@ router.get('/config', requireAuth, (_req: Request, res: Response) => {
     models: {
       localPdfExtraction: {
         provider: 'local',
-        model: 'pdf.js',
+        model: 'PyMuPDF',
         roles: ['pdf-text-extraction'],
       },
       fastText: {
         provider: 'deepseek',
         model: aiModels.deepseekFlash,
-        roles: ['summary-spec', 'quiz-extract', 'flashcards'],
+        roles: ['summary-spec', 'quiz-extract', 'flashcard-generate'],
       },
       generation: {
         provider: 'deepseek',
         model: aiModels.deepseekPro,
-        roles: ['summary', 'quiz-generate'],
+        roles: ['summary', 'quiz-generate', 'flashcard-generate-complex'],
       },
       simpleAudit: {
         provider: 'deepseek',

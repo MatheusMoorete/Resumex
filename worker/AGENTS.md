@@ -1,6 +1,6 @@
 # Worker Python de PDF
 
-`process_pdf.py` é um processo filho chamado por `server/summaryJobs.ts` e `server/quizJobs.ts`.
+`process_pdf.py` é um processo filho chamado pelos jobs de resumo e por `server/src/services/studyCorpus.ts`, que atende simulados e flashcards.
 
 Leia `../docs/backend-technical-debt.md` antes de alterar o protocolo. Os jobs ativos ainda usam a interface legada; a interface `--input/--output/--artifacts-dir` e o `Document IR` novo ainda não estão integrados a eles.
 
@@ -29,4 +29,4 @@ Leia `../docs/backend-technical-debt.md` antes de alterar o protocolo. Os jobs a
 python -m unittest discover -s worker -p "test_*.py"
 ```
 
-Se o manifesto ou o protocolo legado mudar, atualize também `server/summaryJobs.ts`, `server/quizJobs.ts` e os testes Node que invocam o worker.
+Se o manifesto ou o protocolo legado mudar, atualize também `server/summaryJobs.ts`, `server/src/services/studyCorpus.ts` e os testes Node que invocam o worker.

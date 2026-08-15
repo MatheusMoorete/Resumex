@@ -19,6 +19,7 @@ Estas instruções valem para `server/`. O servidor é a fronteira de confiança
 - `src/schemas/`: Validation Schemas Zod em runtime para payloads de API.
 - `summaryJobs.ts`: Criação/upload/polling de jobs, fila em memória e worker PDF.
 - `quizJobs.ts`: upload/polling/cancelamento de simulados, worker PDF e orquestração server-side.
+- `flashcardJobs.ts`: texto/PDF, revisão visual, geração fundamentada e rascunhos de flashcards.
 - `auth/`: Adaptadores de autenticação (Supabase / Mock).
 
 ### Estado da migração V2
@@ -59,6 +60,15 @@ Estas instruções valem para `server/`. O servidor é a fronteira de confiança
 - Aceitam somente 15, 30 ou 45 questões, um job ativo e três criações/inícios por hora por usuário.
 - A leitura visual é automática, limitada a 30 páginas; geração e auditoria são papéis internos, não acessíveis pelo proxy público.
 - PDFs e imagens temporárias são removidos assim que o job termina, falha ou é cancelado.
+
+## Jobs de flashcards
+
+- Aceitam um texto/resumo ou exatamente um PDF de até 50 MB; geração oferece 10, 20 ou 30 cartões.
+- `src/services/studyCorpus.ts` centraliza a ingestão compartilhada com simulados; não copie a chamada do worker.
+- Manuscritos incertos pausam em `awaiting_review` e exigem decisão humana antes da geração.
+- Cada rascunho gerado exige arquivo, página de origem no PDF e `evidenceQuote` literal localizada pelo servidor.
+- DeepSeek Flash é o padrão; Pro entra apenas quando heurísticas locais detectam corpus complexo.
+- Diretórios temporários são removidos ao concluir, falhar, cancelar ou expirar.
 
 ## Verificação
 

@@ -5,7 +5,8 @@
 - `domain/flashcards.ts`: contratos persistidos.
 - `services/flashcardScheduler.ts`: adaptação mínima do `ts-fsrs`.
 - `services/flashcardApi.ts`: REST/RPC Supabase; `localStorage` existe somente para mock E2E.
-- `services/flashcardGenerator.ts`: gera rascunhos a partir do resumo.
+- `services/flashcardJobApi.ts`: envia texto/PDF ao job autenticado e acompanha geração/revisão visual.
+- `server/flashcardJobs.ts`: orquestra extração, visão seletiva, geração e validação de evidência.
 - `components/FlashcardHome.tsx`: baralhos/cartões; `ReviewSession.tsx`: sessão; `CardEditor.tsx`: edição.
 - Esquema e concorrência ficam em `supabase/migrations/202607190001_flashcards.sql`.
 
@@ -17,6 +18,7 @@
 - Toda consulta Supabase depende de RLS por `auth.uid()`. Nunca substitua RLS por filtro apenas no cliente.
 - Rascunhos vazios não são persistidos; frente e verso são aparados.
 - Mock local nunca deve ativar em produção.
+- Cards gerados por IA preservam fonte, página e evidência literal; geração acontece no servidor.
 
 ## Verificação
 

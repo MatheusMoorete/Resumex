@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
-import type { Flashcard, FlashcardDraft } from '../domain/flashcards';
+import type { FlashcardDraft } from '../domain/flashcards';
 
 type Props = {
-  card?: Flashcard | null;
+  card?: Pick<FlashcardDraft, 'front' | 'back'> | null;
   onSave: (draft: FlashcardDraft) => Promise<void>;
   onCancel: () => void;
 };
@@ -70,4 +70,3 @@ export default function CardEditor({ card, onSave, onCancel }: Props) {
     </form>
   );
 }
-
