@@ -1,6 +1,9 @@
 import { buildAuthHeaders } from '../../auth/services/authClient';
 import type { FlashcardDraft } from '../domain/flashcards';
 
+const POLL_INTERVAL_MS = 3000;
+const MAX_CONSECUTIVE_POLL_FAILURES = 5;
+
 export type FlashcardVisualQuestion = {
   id: string;
   page: number;
@@ -41,12 +44,20 @@ async function responseJson(response: Response) {
 
 function wait(milliseconds: number, signal?: AbortSignal) {
   return new Promise<void>((resolve, reject) => {
-    const timeout = window.setTimeout(resolve, milliseconds);
-    signal?.addEventListener('abort', () => {
+    const abort = () => {
       window.clearTimeout(timeout);
       reject(new DOMException('Aborted', 'AbortError'));
-    }, { once: true });
+    };
+    const timeout = window.setTimeout(() => {
+      signal?.removeEventListener('abort', abort);
+      resolve();
+    }, milliseconds);
+    signal?.addEventListener('abort', abort, { once: true });
   });
+}
+
+export function isRetryableFlashcardPollStatus(status: number): boolean {
+  return status >= 500 && status <= 599;
 }
 
 function mapDrafts(job: FlashcardJob): FlashcardDraft[] {
@@ -62,18 +73,39 @@ function mapDrafts(job: FlashcardJob): FlashcardDraft[] {
 
 async function pollJob(id: string, signal?: AbortSignal, onProgress?: (job: FlashcardJob) => void) {
   const headers = await buildAuthHeaders();
+  let consecutiveFailures = 0;
   while (!signal?.aborted) {
-    const job = await responseJson(await fetch(`/api/flashcard/jobs/${id}`, {
-      headers,
-      credentials: 'same-origin',
-      signal,
-    })) as FlashcardJob;
+    let response: Response;
+    try {
+      response = await fetch(`/api/flashcard/jobs/${id}`, {
+        headers,
+        credentials: 'same-origin',
+        signal,
+      });
+    } catch (error) {
+      if (signal?.aborted || consecutiveFailures >= MAX_CONSECUTIVE_POLL_FAILURES) throw error;
+      consecutiveFailures += 1;
+      await wait(Math.min(POLL_INTERVAL_MS * consecutiveFailures, 10_000), signal);
+      continue;
+    }
+
+    if (!response.ok && isRetryableFlashcardPollStatus(response.status)) {
+      if (consecutiveFailures >= MAX_CONSECUTIVE_POLL_FAILURES) {
+        throw new Error('O servidor ficou temporariamente indisponível durante a geração. Tente novamente.');
+      }
+      consecutiveFailures += 1;
+      await wait(Math.min(POLL_INTERVAL_MS * consecutiveFailures, 10_000), signal);
+      continue;
+    }
+
+    const job = await responseJson(response) as FlashcardJob;
+    consecutiveFailures = 0;
     onProgress?.(job);
     if (job.status === 'completed' || job.status === 'awaiting_review') return job;
     if (job.status === 'failed' || job.status === 'cancelled') {
       throw new Error(job.error || (job.status === 'cancelled' ? 'Geração cancelada.' : 'Falha ao gerar flashcards.'));
     }
-    await wait(1500, signal);
+    await wait(POLL_INTERVAL_MS, signal);
   }
   throw new DOMException('Aborted', 'AbortError');
 }

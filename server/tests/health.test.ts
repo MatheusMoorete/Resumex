@@ -14,6 +14,7 @@ import { normalizeFlashcardCount } from '../flashcardJobs.js';
 import { validateFlashcardCandidates } from '../src/services/flashcardGeneration.js';
 import { applyVisualAnswers, getVisualQuestions } from '../src/services/studyCorpus.js';
 import { verifyQuestionEvidence } from '../../src/features/quiz/services/quizApi.js';
+import { isRetryableFlashcardPollStatus } from '../../src/features/flashcards/services/flashcardJobApi.js';
 
 describe('Server Modular Health & Utilities (TypeScript)', () => {
   it('should export Express app instance', () => {
@@ -168,6 +169,13 @@ describe('Server Modular Health & Utilities (TypeScript)', () => {
     expect(cards).toHaveLength(1);
     expect(cards[0]).toMatchObject({ sourceType: 'pdf', sourcePage: 1, back: '30 mmHg.' });
     expect(normalizeFlashcardCount(999)).toBe(20);
+  });
+
+  it('should retry only transient server failures while polling flashcard jobs', () => {
+    expect(isRetryableFlashcardPollStatus(502)).toBe(true);
+    expect(isRetryableFlashcardPollStatus(503)).toBe(true);
+    expect(isRetryableFlashcardPollStatus(404)).toBe(false);
+    expect(isRetryableFlashcardPollStatus(429)).toBe(false);
   });
 
   it('should require and apply human confirmation for uncertain visual text', () => {
