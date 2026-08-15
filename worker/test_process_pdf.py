@@ -5,6 +5,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 import pymupdf as fitz
 
@@ -116,10 +117,12 @@ class TestProcessPDF(unittest.TestCase):
         out_json = self.base_dir / "output.json"
         artifacts = self.base_dir / "artifacts"
 
-        doc_ir = process_pdf_document(pdf_path, out_json, artifacts)
+        with patch.object(fitz.TOOLS, "store_shrink", wraps=fitz.TOOLS.store_shrink) as shrink_store:
+            doc_ir = process_pdf_document(pdf_path, out_json, artifacts)
 
         self.assertIn("hasEmbeddedImages", doc_ir.pages[0].flags)
         self.assertTrue(len(doc_ir.pages[0].rasterReferences) >= 1)
+        shrink_store.assert_called_once_with(100)
 
     def test_empty_page(self):
         def build(doc):

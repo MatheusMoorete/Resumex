@@ -250,6 +250,7 @@ def analyze_page_layers(
     try:
         pix = page.get_pixmap(matrix=fitz.Matrix(1.5, 1.5), alpha=False)
         colored_regions = detect_ink_color_regions(pix, width, height)
+        pix = None
         for cbbox in colored_regions:
             has_handwriting = True
             candidates.append(
@@ -308,6 +309,8 @@ def analyze_page_layers(
 
                 cand.cropPath = f"crops/{crop_filename}"
                 cand.cropHash = hashlib.sha256(crop_bytes).hexdigest()
+                pix_crop = None
+                crop_bytes = None
             except Exception:
                 pass
 

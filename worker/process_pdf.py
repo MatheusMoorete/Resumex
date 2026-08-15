@@ -220,12 +220,14 @@ def process_pdf_document(
                         if pix.n >= 5:
                             pix = fitz.Pixmap(fitz.csRGB, pix)
                         pix.save(str(img_path))
+                        pix = None
                     except Exception as e:
                         page_warnings.append(f"Falha ao salvar imagem xref {xref}: {str(e)}")
                 else:
                     try:
                         pix = page.get_pixmap(clip=img_bbox, matrix=fitz.Matrix(1.5, 1.5))
                         pix.save(str(img_path))
+                        pix = None
                     except Exception as e:
                         page_warnings.append(f"Falha ao renderizar imagem de região: {str(e)}")
 
@@ -388,6 +390,7 @@ def process_pdf_document(
             preview_path = pages_dir / preview_filename
             pix = page.get_pixmap(matrix=fitz.Matrix(1.8, 1.8), alpha=False)
             preview_path.write_bytes(pix.tobytes("jpeg", jpg_quality=85))
+            pix = None
 
             raster_refs.append(
                 RasterReference(
@@ -434,6 +437,7 @@ def process_pdf_document(
             doc_pages.append(doc_page)
 
             print(json.dumps({"event": "page_processed", "pageNumber": page_idx, "flags": flags, "blocksCount": len(blocks)}), flush=True)
+            fitz.TOOLS.store_shrink(100)
 
     # Gravando relatório de análise de páginas para desenvolvimento em artifacts/page-analysis-report.json
     report_data = [
