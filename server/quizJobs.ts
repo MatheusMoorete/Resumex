@@ -31,6 +31,7 @@ const MAX_TOTAL_BYTES = 100 * 1024 * 1024;
 const MAX_ACTIVE_JOBS_PER_USER = 1;
 const MAX_VISION_PAGES = 30;
 const MAX_CORPUS_CHARS = 500_000;
+const MAX_SUMMARY_CHARS = 180_000;
 const MAX_REFERENCE_QUESTIONS = 45;
 const MAX_TEXT_AI_CALLS = 30;
 const JOB_TTL_MS = 2 * 60 * 60 * 1000;
@@ -63,6 +64,7 @@ interface QuizJob {
   analysis: any;
   options: ReturnType<typeof normalizeQuizOptions>;
   files: Array<{ name: string; path: string; size: number; uploaded: boolean }>;
+  summarySource: { name: string; text: string } | null;
   updatedAt: number;
   controller: AbortController;
 }
@@ -105,6 +107,15 @@ export function normalizeQuizOptions(input: any) {
     ? input.focusQuestions.slice(0, MAX_REFERENCE_QUESTIONS).map(sanitizeQuestionReference)
     : [];
   return { questionCount, questionMode, practiceMode, previousQuestions, focusQuestions };
+}
+
+export function normalizeQuizSummarySource(input: any) {
+  const text = String(input?.text || '').trim();
+  if (!text || text.length > MAX_SUMMARY_CHARS) return null;
+  return {
+    name: boundedText(input?.name, 200) || 'Resumo atual.md',
+    text,
+  };
 }
 
 function cleanOldJobs(): void {
@@ -284,6 +295,24 @@ async function runJob(jobId: string) {
   if (!job || job.status === 'cancelled') return;
 
   try {
+    let files;
+    if (job.summarySource) {
+      update(job, {
+        status: 'processing',
+        stage: 'classify',
+        message: 'Preparando o resumo como fonte do simulado.',
+        progress: 30,
+      });
+      files = [{
+        name: job.summarySource.name,
+        size: Buffer.byteLength(job.summarySource.text, 'utf8'),
+        numPages: 1,
+        pageTexts: [job.summarySource.text],
+        text: `--- Página 1 ---\n${job.summarySource.text}`,
+        readMode: 'text',
+        requiresVision: false,
+      }];
+    } else {
     update(job, {
       status: 'processing',
       stage: 'files',
@@ -328,7 +357,8 @@ async function runJob(jobId: string) {
       });
     }
 
-    const files = buildCorpusFiles(job, pages);
+      files = buildCorpusFiles(job, pages);
+    }
     const corpusChars = files.reduce((total, file) => total + file.text.length, 0);
     if (corpusChars > MAX_CORPUS_CHARS) {
       throw new Error(
@@ -390,8 +420,14 @@ router.post('/', createJobRateLimit, async (req: Request, res: Response) => {
     return;
   }
   const rawFiles = Array.isArray(req.body?.files) ? req.body.files : [];
-  if (!rawFiles.length || rawFiles.length > MAX_FILES) {
-    res.status(400).json({ error: { message: `Selecione entre 1 e ${MAX_FILES} arquivos PDF.` } });
+  const rawSummaryText = String(req.body?.summarySource?.text || '').trim();
+  if (rawSummaryText.length > MAX_SUMMARY_CHARS) {
+    res.status(400).json({ error: { message: `O resumo não pode ultrapassar ${MAX_SUMMARY_CHARS.toLocaleString('pt-BR')} caracteres.` } });
+    return;
+  }
+  const summarySource = normalizeQuizSummarySource(req.body?.summarySource);
+  if ((rawFiles.length > 0 && summarySource) || (!rawFiles.length && !summarySource) || rawFiles.length > MAX_FILES) {
+    res.status(400).json({ error: { message: `Envie um resumo ou entre 1 e ${MAX_FILES} arquivos PDF.` } });
     return;
   }
   const activeJobs = Array.from(jobs.values()).filter(
@@ -424,7 +460,7 @@ router.post('/', createJobRateLimit, async (req: Request, res: Response) => {
     dir,
     status: 'uploading',
     stage: 'files',
-    message: 'Aguardando envio dos PDFs.',
+    message: summarySource ? 'Resumo recebido.' : 'Aguardando envio dos PDFs.',
     progress: 0,
     error: null,
     questions: [],
@@ -436,6 +472,7 @@ router.post('/', createJobRateLimit, async (req: Request, res: Response) => {
       path: path.join(dir, `file-${index}.pdf`),
       uploaded: false,
     })),
+    summarySource,
     updatedAt: Date.now(),
     controller: new AbortController(),
   };

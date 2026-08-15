@@ -240,7 +240,7 @@ export default function ResultView({ fileData, pdfUrl, summary, onNewSummary, on
                 <span className="home-confirmation-kicker">CRIAR SIMULADO?</span>
                 <h2 id="confirm-dialog-title">Gerar simulado de questões?</h2>
                 <p>
-                  Será criado um teste objetivo com questões de múltipla escolha e gabarito comentado com base no conteúdo deste material.
+                  Será criado um teste objetivo com questões de múltipla escolha e gabarito comentado com base neste resumo.
                 </p>
                 <div className="home-confirmation-actions">
                   <button

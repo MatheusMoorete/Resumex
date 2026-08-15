@@ -9,7 +9,7 @@ import {
 } from '../src/routes/aiProxy.js';
 import { getClientId } from '../src/middlewares/rateLimit.js';
 import { normalizePreferences, preferenceInstructions } from '../summaryJobs.js';
-import { normalizeQuizOptions } from '../quizJobs.js';
+import { normalizeQuizOptions, normalizeQuizSummarySource } from '../quizJobs.js';
 import { verifyQuestionEvidence } from '../../src/features/quiz/services/quizApi.js';
 
 describe('Server Modular Health & Utilities (TypeScript)', () => {
@@ -120,6 +120,15 @@ describe('Server Modular Health & Utilities (TypeScript)', () => {
     expect(options.questionMode).toBe('generated_only');
     expect(options.previousQuestions).toHaveLength(45);
     expect(options.previousQuestions[0].explanation).toHaveLength(1200);
+  });
+
+  it('should accept a bounded summary as a quiz source', () => {
+    expect(normalizeQuizSummarySource({ name: 'Resumo.md', text: '  Conteúdo rastreável (p. 2).  ' })).toEqual({
+      name: 'Resumo.md',
+      text: 'Conteúdo rastreável (p. 2).',
+    });
+    expect(normalizeQuizSummarySource({ name: '   ', text: 'Conteúdo válido.' })?.name).toBe('Resumo atual.md');
+    expect(normalizeQuizSummarySource({ text: 'A'.repeat(180_001) })).toBeNull();
   });
 
   it('should verify quiz evidence on the declared file and page', () => {

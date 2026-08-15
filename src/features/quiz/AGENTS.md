@@ -12,6 +12,7 @@
 ## Invariantes
 
 - Cada questão entregue precisa de arquivo, página e `evidenceQuote` literal localizável no corpus.
+- Um resumo pode substituir os PDFs como corpus do job; nesse caso ele é uma fonte única de texto e o mesmo gerador/auditor deve ser reutilizado.
 - Valores, unidades e comparadores exigem correspondência literal; aproximação semântica não basta.
 - Questão reprovada não completa a quantidade pedida.
 - Auditoria usa apenas a evidência fornecida e provedor independente quando exigido.

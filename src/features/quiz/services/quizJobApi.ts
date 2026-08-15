@@ -29,11 +29,13 @@ function wait(milliseconds: number, signal?: AbortSignal) {
 
 export async function prepareQuizJob({
   files,
+  summarySource,
   options,
   signal,
   onProgress,
 }: {
   files: File[];
+  summarySource?: { name: string; text: string } | null;
   options: unknown;
   signal?: AbortSignal;
   onProgress?: (job: QuizJob) => void;
@@ -45,6 +47,7 @@ export async function prepareQuizJob({
     credentials: 'same-origin',
     body: JSON.stringify({
       files: files.map((file) => ({ name: file.name, size: file.size })),
+      summarySource,
       options,
     }),
     signal,

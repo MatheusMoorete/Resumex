@@ -1,5 +1,4 @@
 import { buildAuthHeaders } from '../../auth/services/authClient';
-import { stripPageReferences } from '../../../shared/utils/clipboard';
 
 export interface SavedSummary {
   id: string;
@@ -68,7 +67,7 @@ function saveLocalSummary(draft: SummaryDraft): SavedSummary {
   const timestamp = new Date().toISOString();
   const title = draft.title.trim() || 'Resumo Sem Título';
   const template_type = draft.template_type || 'general';
-  const content = stripPageReferences(draft.content);
+  const content = draft.content;
 
   const newSummary: SavedSummary = {
     id: crypto.randomUUID(),
@@ -89,7 +88,7 @@ function saveLocalSummary(draft: SummaryDraft): SavedSummary {
 export async function listSummaries(): Promise<SavedSummary[]> {
   const localItems = readMock();
   if (isMock) {
-    return localItems.map((item) => ({ ...item, content: stripPageReferences(item.content) }));
+    return localItems;
   }
   try {
     const remoteItems: SavedSummary[] = await request('summaries?select=*&order=created_at.desc');
@@ -97,25 +96,25 @@ export async function listSummaries(): Promise<SavedSummary[]> {
       const remoteIds = new Set(remoteItems.map((item) => item.id));
       const combined = [...remoteItems, ...localItems.filter((item) => !remoteIds.has(item.id))];
       const sorted = combined.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-      return sorted.map((item) => ({ ...item, content: stripPageReferences(item.content) }));
+      return sorted;
     }
   } catch (err) {
     console.warn('[summaryApi] Supabase list failed, returning local storage items:', err);
   }
-  return localItems.map((item) => ({ ...item, content: stripPageReferences(item.content) }));
+  return localItems;
 }
 
 export async function findSummaryByHash(contentHash: string): Promise<SavedSummary | null> {
   if (!contentHash) return null;
   const localList = readMock();
   const localMatch = localList.find((item) => item.content_hash === contentHash);
-  if (localMatch) return { ...localMatch, content: stripPageReferences(localMatch.content) };
+  if (localMatch) return localMatch;
 
   if (!isMock) {
     try {
       const remoteMatch: SavedSummary[] = await request(`summaries?content_hash=eq.${encodeURIComponent(contentHash)}&limit=1`);
       if (Array.isArray(remoteMatch) && remoteMatch[0]) {
-        return { ...remoteMatch[0], content: stripPageReferences(remoteMatch[0].content) };
+        return remoteMatch[0];
       }
     } catch {
       // Fallback silently if query fails
@@ -125,10 +124,7 @@ export async function findSummaryByHash(contentHash: string): Promise<SavedSumma
 }
 
 export async function createSummary(draft: SummaryDraft): Promise<SavedSummary> {
-  const cleanDraft: SummaryDraft = {
-    ...draft,
-    content: stripPageReferences(draft.content),
-  };
+  const cleanDraft = draft;
 
   if (isMock) {
     return saveLocalSummary(cleanDraft);
@@ -150,7 +146,7 @@ export async function createSummary(draft: SummaryDraft): Promise<SavedSummary> 
         tags: cleanDraft.tags || [],
       }),
     });
-    if (saved) return { ...saved, content: stripPageReferences(saved.content) };
+    if (saved) return saved;
   } catch (err) {
     console.warn('[summaryApi] Supabase save failed, falling back to local storage:', err);
   }

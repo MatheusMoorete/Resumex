@@ -160,6 +160,7 @@ export default function App() {
   const [summary, setSummary] = useState('');
   const [summaryJob, setSummaryJob] = useState({ stage: 'queued', progress: 0 });
   const [quizFiles, setQuizFiles] = useState([]);
+  const [quizSummarySource, setQuizSummarySource] = useState<{ name: string; text: string } | null>(null);
   const [quizQuestions, setQuizQuestions] = useState([]);
   const [quizAnalysis, setQuizAnalysis] = useState(null);
   const [activeQuizJobId, setActiveQuizJobId] = useState<string | null>(null);
@@ -192,7 +193,7 @@ export default function App() {
     const needsResultData = routeState === 'result';
     const needsQuizData = routeState === 'quiz-processing' || routeState === 'quiz-result';
 
-    if ((!isE2EMockMode && needsSummaryData && !fileData) || (needsResultData && !fileData && !summary) || (needsQuizData && !quizFiles.length)) {
+    if ((!isE2EMockMode && needsSummaryData && !fileData) || (needsResultData && !fileData && !summary) || (needsQuizData && !quizFiles.length && !quizSummarySource)) {
       setAppStateValue('upload');
       setHomeInitialMode(needsQuizData ? 'quiz' : 'summary');
       navigate(needsQuizData ? HOME_MODE_ROUTES.quiz : '/app', { replace: true });
@@ -201,7 +202,7 @@ export default function App() {
 
     setAppStateValue(routeState);
     if (routeState === 'upload') setHomeInitialMode(getRouteMode(location.pathname));
-  }, [fileData, summary, location.pathname, navigate, quizFiles.length]);
+  }, [fileData, summary, location.pathname, navigate, quizFiles.length, quizSummarySource]);
 
   // Abort controller
   const abortControllerRef = useRef(null);
@@ -359,6 +360,7 @@ export default function App() {
   const handleStartQuiz = useCallback(() => {
     abortActiveWork();
     setQuizFiles([]);
+    setQuizSummarySource(null);
     setQuizQuestions([]);
     setQuizAnalysis(null);
     setQuizOptions({ questionMode: 'generated_only', questionCount: 15 });
@@ -413,13 +415,17 @@ export default function App() {
     const sourceFiles = files
       .map((file) => file?.file instanceof File ? file.file : file)
       .filter((file) => file instanceof File);
-    if (!sourceFiles.length) {
-      setError('Selecione ao menos um PDF para gerar o simulado.');
+    const summarySource = options.summarySource?.text?.trim()
+      ? { name: options.summarySource.name || 'Resumo atual.md', text: options.summarySource.text.trim() }
+      : null;
+    if (!sourceFiles.length && !summarySource) {
+      setError('Selecione ao menos um PDF ou resumo para gerar o simulado.');
       setAppState('error');
       return;
     }
 
     setQuizFiles(files);
+    setQuizSummarySource(summarySource);
     setQuizQuestions([]);
     setQuizAnalysis(null);
     setQuizOptions(nextQuizOptions);
@@ -440,6 +446,7 @@ export default function App() {
     try {
       const job = await prepareQuizJob({
         files: sourceFiles,
+        summarySource,
         options: {
           ...nextQuizOptions,
           previousQuestions: options.previousQuestions || [],
@@ -456,7 +463,7 @@ export default function App() {
       setQuizAnalysis(job.analysis);
       setQuizQuestions(job.questions);
       createQuiz(
-        sourceFiles[0]?.name ? `Simulado - ${sourceFiles[0].name}` : 'Simulado Médico',
+        `Simulado - ${sourceFiles[0]?.name || summarySource?.name || 'Resumo atual'}`,
         job.questions
       ).catch((e) => console.error('Erro ao salvar simulado:', e));
       setAppState('quiz-result');
@@ -476,17 +483,19 @@ export default function App() {
       practiceMode: variant,
       previousQuestions: quizQuestions,
       focusQuestions: payload.focusQuestions || [],
+      summarySource: quizSummarySource,
     });
-  }, [handleGenerateQuiz, quizAnalysis, quizFiles, quizOptions, quizQuestions]);
+  }, [handleGenerateQuiz, quizAnalysis, quizFiles, quizOptions, quizQuestions, quizSummarySource]);
 
   const handleCreateQuizFromSummary = useCallback(async () => {
-    const files = (fileData?.files || []).map((item: any) => item.file).filter(Boolean);
-    if (files.length > 0) {
-      await handleGenerateQuiz(files, { questionMode: 'generated_only', questionCount: 15 });
-    } else {
-      handleStartQuiz();
-    }
-  }, [fileData, handleGenerateQuiz, handleStartQuiz]);
+    if (!summary.trim()) throw new Error('O resumo está vazio.');
+    const sourceName = fileData?.files?.[0]?.name?.replace(/\.pdf$/i, '') || 'Resumo atual';
+    await handleGenerateQuiz([], {
+      questionMode: 'generated_only',
+      questionCount: 15,
+      summarySource: { name: `${sourceName}.md`, text: summary },
+    });
+  }, [fileData, handleGenerateQuiz, summary]);
 
   const handleCancelQuizProcessing = useCallback(() => {
     abortActiveWork();
@@ -683,6 +692,7 @@ export default function App() {
     setVisualQuestions([]);
     setSummary('');
     setQuizFiles([]);
+    setQuizSummarySource(null);
     setQuizQuestions([]);
     setQuizAnalysis(null);
     setQuizOptions({ questionMode: 'generated_only', questionCount: 15 });
@@ -751,6 +761,7 @@ export default function App() {
     setVisualQuestions([]);
     setSummary('');
     setQuizFiles([]);
+    setQuizSummarySource(null);
     setQuizQuestions([]);
     setQuizAnalysis(null);
     setQuizOptions({ questionMode: 'generated_only', questionCount: 15 });
